@@ -2,7 +2,12 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="fx-CG50">
+<meta name="theme-color" content="#17181c">
 <title>CASIO fx-CG50 Emulator</title>
 <style>
 *{box-sizing:border-box}
@@ -44,12 +49,33 @@ body{background:radial-gradient(circle at 30% 15%,#3d4c66,#141924 70%);font-fami
 #help kbd{background:#2a3242;border:1px solid #4a556b;border-radius:4px;padding:0 5px;font:11px Menlo,Consolas,monospace;white-space:nowrap}
 #help p{margin:4px 0}
 @media(max-width:860px){#help{display:none}}
+#fs{background:none;border:1px solid #5a5f6b;color:#dfe4ee;border-radius:6px;font-size:14px;line-height:1;width:30px;height:24px;margin-left:10px;cursor:pointer;padding:0;vertical-align:middle}
+#fs:active{background:#3a4050}
+#calc{-webkit-tap-highlight-color:transparent;-webkit-touch-callout:none}
+#hap{position:fixed;left:-99px;top:0;opacity:0;pointer-events:none}
+/* fill mode: phones and full screen. The calculator fills the viewport and the keys stretch to the aspect ratio */
+body.fill{padding:0;overflow:hidden;display:block;background:#17181c;overscroll-behavior:none}
+body.fill #help{display:none}
+body.fill #calc{border-radius:0;border:0;box-shadow:none;display:flex;flex-direction:column;margin:0;padding:calc(6px + env(safe-area-inset-top)) calc(14px + env(safe-area-inset-right)) calc(10px + env(safe-area-inset-bottom)) calc(14px + env(safe-area-inset-left))}
+body.fill #scr{flex:none}
+body.fill #keys{flex:1;display:flex;flex-direction:column;min-height:0}
+body.fill .row{flex:1.5;grid-auto-rows:1fr;min-height:0}
+body.fill .row.r6{flex:1.15}
+body.fill .row.rpad{flex:2.3}
+body.fill .row:first-child{flex:.95}
+body.fill .k{height:auto;flex:1;min-height:0}
+body.fill .k.fk{max-height:30px}
+body.fill #calc.land{flex-direction:row;gap:16px}
+body.fill #calc.land #dpad{transform:scale(.78)}
+body.fill #calc.land #scr{width:400px;display:flex;flex-direction:column;justify-content:center}
 </style>
 </head>
 <body>
 <div id="calc">
-  <div id="top"><span class="brand">CASIO</span><span class="model">fx-CG50</span></div>
-  <div id="bezel"><canvas id="lcd" width="1152" height="648"></canvas></div>
+  <div id="scr">
+    <div id="top"><span class="brand">CASIO</span><span><span class="model">fx-CG50</span><button id="fs" title="Full screen" aria-label="Full screen">⛶</button></span></div>
+    <div id="bezel"><canvas id="lcd" width="1152" height="648"></canvas></div>
+  </div>
   <div id="keys"></div>
 </div>
 <aside id="help">
@@ -1375,7 +1401,7 @@ function build(){const root=$('keys');
   for(const[cls,ids]of ROWS){const row=document.createElement('div');row.className='row '+cls;
     for(const id of ids){if(id==='@'){const p=document.createElement('div');p.id='padc';p.innerHTML='<div id="dpad"><button class="u" data-k="UP" tabindex="-1">▲</button><button class="l" data-k="LEFT" tabindex="-1">◀</button><button class="r" data-k="RIGHT" tabindex="-1">▶</button><button class="d" data-k="DOWN" tabindex="-1">▼</button></div>';row.appendChild(p)}else row.appendChild(mk(id))}
     root.appendChild(row)}
-  root.addEventListener('pointerdown',e=>{const b=e.target.closest('[data-k]');if(!b)return;e.preventDefault();const id=b.dataset.k;press(id);stopRep();
+  root.addEventListener('pointerdown',e=>{const b=e.target.closest('[data-k]');if(!b)return;e.preventDefault();const id=b.dataset.k;buzz();press(id);stopRep();
     if(['UP','DOWN','LEFT','RIGHT','DEL'].includes(id))repT=setTimeout(()=>{repI=setInterval(()=>press(id),70)},420)});
   addEventListener('pointerup',stopRep);addEventListener('pointercancel',stopRep);
   cv.addEventListener('pointerdown',e=>{const r=cv.getBoundingClientRect(),t=topS();if(power&&t.click){t.click((e.clientX-r.left)/r.width*W,(e.clientY-r.top)/r.height*H);render()}})}
@@ -1383,8 +1409,23 @@ const KB={Enter:'EXE',Backspace:'DEL',Delete:'AC',Escape:'EXIT',ArrowUp:'UP',Arr
   '+':'+','-':'-','*':'×','/':'÷','(':'(',')':')',',':',','.':'.','^':'^',Tab:'SHIFT','`':'ALPHA',a:'ALPHA',x:'XTT',s:'sin',c:'cos',t:'tan',l:'log',n:'ln',q:'x2',r:'!sqrt',p:'!π',e:'EXP','=':'!=','_':'NEG',m:'MENU',o:'OPTN',v:'VARS',f:'frac',d:'SD','>':'STO'};
 addEventListener('keydown',e=>{if(e.metaKey||e.ctrlKey||e.altKey)return;const k=e.key;let id=KB[k];if(!id&&/^[0-9]$/.test(k))id=k;if(!id&&/^[A-Z]$/.test(k))id='!'+k;if(!id)return;e.preventDefault();
   if(id[0]==='!')logical(id.slice(1));else{flash(id);press(id)}});
-function fit(){const c=$('calc');c.style.zoom=1;c.style.zoom=Math.max(.45,Math.min(1.5,(innerHeight-24)/c.offsetHeight,(innerWidth-24)/c.offsetWidth))}
-build();stack.push(new MainMenu());fit();addEventListener('resize',fit);render();
+let pseudoFS=false;
+const COARSE=window.matchMedia&&matchMedia('(pointer:coarse)').matches;
+const isFS=()=>!!(document.fullscreenElement||document.webkitFullscreenElement);
+function fit(){const c=$('calc'),fill=COARSE||innerWidth<700||isFS()||pseudoFS;document.body.classList.toggle('fill',fill);c.style.zoom=1;c.style.width=c.style.height='';
+  if(!fill){c.classList.remove('land');c.style.zoom=Math.max(.45,Math.min(1.5,(innerHeight-24)/c.offsetHeight,(innerWidth-24)/c.offsetWidth));return}
+  // portrait: screen above keys; landscape: screen beside keys. Width/height are set so the zoomed box exactly covers the viewport
+  const land=innerWidth>innerHeight*1.15,z=land?Math.min(innerWidth/860,innerHeight/400):Math.min(innerWidth/440,innerHeight/640);
+  c.classList.toggle('land',land);c.style.zoom=z;c.style.width=innerWidth/z+'px';c.style.height=innerHeight/z+'px'}
+function toggleFS(){const d=document,el=d.documentElement,req=el.requestFullscreen||el.webkitRequestFullscreen,ex=d.exitFullscreen||d.webkitExitFullscreen;
+  if(isFS()){ex.call(d);return}
+  if(req){try{const r=req.call(el);if(r&&r.catch)r.catch(()=>{pseudoFS=!pseudoFS;fit()})}catch(e){pseudoFS=!pseudoFS;fit()}}
+  else{pseudoFS=!pseudoFS;fit();if(pseudoFS&&power){note('Tip: Share > Add to Home Screen');render()}}}
+// haptics: Vibration API where available (Android); on iOS, toggling a hidden switch control produces the system tick
+let hapEl=null;
+function buzz(){if(!COARSE)return;if(navigator.vibrate){navigator.vibrate(8);return}
+  if(!hapEl){hapEl=document.createElement('label');hapEl.id='hap';hapEl.innerHTML='<input type="checkbox" switch>';document.body.appendChild(hapEl)}hapEl.click()}
+build();stack.push(new MainMenu());fit();addEventListener('resize',fit);addEventListener('orientationchange',()=>setTimeout(fit,150));document.addEventListener('fullscreenchange',fit);document.addEventListener('webkitfullscreenchange',fit);$('fs').addEventListener('click',toggleFS);render();
 setInterval(()=>{blink=!blink;if(power&&(CURPOS||!blink))render()},500);
 if(document.fonts&&document.fonts.ready)document.fonts.ready.then(render);
 </script>
