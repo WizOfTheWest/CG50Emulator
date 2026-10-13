@@ -144,7 +144,7 @@ const SYN={msg:'Syntax ERROR'},MA={msg:'Ma ERROR'};
 /* ================= numbers: exact fractions + floats ================= */
 class Fr{constructor(p,q){this.p=p;this.q=q}}
 class Cx{constructor(re,im){this.re=re;this.im=im}}
-const isF=v=>v instanceof Fr,isC=v=>v instanceof Cx,N=v=>{if(isF(v))return v.p/v.q;if(isC(v)||Array.isArray(v))throw MA;return v},I=n=>new Fr(n,1);
+const isF=v=>v instanceof Fr,isC=v=>v instanceof Cx,N=v=>{if(isF(v))return v.p/v.q;if(isC(v)||isM(v)||Array.isArray(v))throw MA;return v},I=n=>new Fr(n,1);
 const cx=v=>isC(v)?v:{re:N(v),im:0},mkc=(re,im)=>{re=cl(re);im=cl(im);if(!isFinite(re)||!isFinite(im))throw MA;return im===0?re:new Cx(re,im)};
 function cop(o,a,b){const A=cx(a),B=cx(b);if(o===0)return mkc(A.re+B.re,A.im+B.im);if(o===1)return mkc(A.re-B.re,A.im-B.im);if(o===2)return mkc(A.re*B.re-A.im*B.im,A.re*B.im+A.im*B.re);
   const d=B.re*B.re+B.im*B.im;if(d===0)throw MA;return mkc((A.re*B.re+A.im*B.im)/d,(A.im*B.re-A.re*B.im)/d)}
@@ -156,13 +156,46 @@ function cstr(v,dig){if(SETUP.cplx==='r∠θ')return fmt(Math.hypot(v.re,v.im),d
   return(v.re?fmt(v.re,dig)+(v.im<0?'-':'+'):(v.im<0?'-':''))+(a===1?'':fmt(a,dig))+'i'}
 const gcd=(a,b)=>{while(b){[a,b]=[b,a%b]}return a};
 function mkfr(p,q){if(q===0)throw MA;if(!(Math.abs(p)<9e15&&Math.abs(q)<9e15))return p/q;if(q<0){p=-p;q=-q}const d=gcd(Math.abs(p),q)||1;return new Fr(p/d,q/d)}
-const add=(a,b)=>isC(a)||isC(b)?cop(0,a,b):isF(a)&&isF(b)?mkfr(a.p*b.q+b.p*a.q,a.q*b.q):N(a)+N(b);
-const sub=(a,b)=>isC(a)||isC(b)?cop(1,a,b):isF(a)&&isF(b)?mkfr(a.p*b.q-b.p*a.q,a.q*b.q):N(a)-N(b);
-const mul=(a,b)=>isC(a)||isC(b)?cop(2,a,b):isF(a)&&isF(b)?mkfr(a.p*b.p,a.q*b.q):N(a)*N(b);
-const div=(a,b)=>{if(isC(a)||isC(b))return cop(3,a,b);if(N(b)===0)throw MA;return isF(a)&&isF(b)?mkfr(a.p*b.q,a.q*b.p):N(a)/N(b)};
-const neg=a=>isC(a)?new Cx(-a.re,-a.im):isF(a)?new Fr(-a.p,a.q):-a;
+// ---- matrices and vectors (a vector is a 1×n or m×1 matrix)
+class Mx{constructor(d){this.d=d}}
+const isM=v=>v instanceof Mx,DIM={msg:'Dimension ERROR'},MATS={},VCTS={};let MATANS=null,VCTANS=null;
+const isVec=m=>m.d.length===1||m.d[0].length===1,mag=v=>isC(v)?Math.hypot(v.re,v.im):Math.abs(N(v)),absv=v=>isC(v)?Math.hypot(v.re,v.im):isF(v)?new Fr(Math.abs(v.p),v.q):Math.abs(N(v));
+const mzero=(m,n)=>new Mx(Array.from({length:m},()=>Array(n).fill(I(0)))),mident=n=>{const M=mzero(n,n);for(let i=0;i<n;i++)M.d[i][i]=I(1);return M},mmap=(M,f)=>new Mx(M.d.map(r=>r.map(f)));
+function mmul(A,B){const a=A.d,b=B.d;if(a[0].length!==b.length)throw DIM;return new Mx(a.map(r=>b[0].map((_,j)=>r.reduce((t,x,k)=>add(t,mul(x,b[k][j])),I(0)))))}
+// Gaussian elimination with partial pivoting. norm: scale pivots to 1; full: clear above the pivots as well
+function melim(M,full,norm){const d=M.d.map(r=>r.slice()),m=d.length,n=d[0].length;let det=I(1),r=0;
+  for(let c=0;c<n&&r<m;c++){let p=r;for(let i=r+1;i<m;i++)if(mag(d[i][c])>mag(d[p][c]))p=i;if(mag(d[p][c])<1e-13){for(let i=r;i<m;i++)d[i][c]=I(0);continue}
+    if(p!==r){[d[p],d[r]]=[d[r],d[p]];det=neg(det)}const pv=d[r][c];det=mul(det,pv);if(norm)d[r]=d[r].map(x=>div(x,pv));
+    for(let i=full?0:r+1;i<m;i++){if(i===r)continue;const f=norm?d[i][c]:div(d[i][c],pv);if(mag(f)===0)continue;d[i]=d[i].map((x,j)=>j===c?I(0):sub(x,mul(f,d[r][j])))}
+    r++}
+  return{d,det:r<m?I(0):det}}
+function mdet(M){if(M.d.length!==M.d[0].length)throw DIM;return melim(M,false,false).det}
+function minv(M){const n=M.d.length;if(n!==M.d[0].length)throw DIM;if(mag(mdet(M))<1e-13)throw MA;const E=mident(n);return new Mx(melim(new Mx(M.d.map((r,i)=>r.concat(E.d[i]))),true,true).d.map(r=>r.slice(n)))}
+function mpow(A,b){let n=N(b);if(A.d.length!==A.d[0].length)throw DIM;if(!Number.isInteger(n)||Math.abs(n)>32766)throw MA;if(n<0){A=minv(A);n=-n}let R=mident(A.d.length);while(n){if(n&1)R=mmul(R,A);n>>=1;if(n)A=mmul(A,A)}return R}
+function mop(o,a,b){const A=isM(a),B=isM(b);
+  if(o<2){if(!A||!B||a.d.length!==b.d.length||a.d[0].length!==b.d[0].length)throw DIM;const f=o?sub:add;return new Mx(a.d.map((r,i)=>r.map((x,j)=>f(x,b.d[i][j]))))}
+  if(o===2)return A&&B?mmul(a,b):A?mmap(a,x=>mul(x,b)):mmap(b,x=>mul(a,x));
+  return B?mop(2,a,minv(b)):mmap(a,x=>div(x,b))}
+const vflat=m=>{if(!isM(m)||!isVec(m))throw DIM;return m.d.length===1?m.d[0]:m.d.map(r=>r[0])},vlike=(m,a)=>m.d.length===1?new Mx([a]):new Mx(a.map(x=>[x]));
+const vdot=(a,b)=>{if(a.length!==b.length)throw DIM;return a.reduce((t,x,i)=>add(t,mul(x,b[i])),I(0))},vnorm=a=>sqrtv(a.reduce((t,x)=>add(t,isC(x)?mag(x)**2:mul(x,x)),I(0)));
+function assign(tg,v){const t=tg[0],L=x=>typeof x==='string'&&/^[A-Z]$/.test(x);
+  if(tg.length===1&&t in VARS){if(isM(v)||Array.isArray(v))throw MA;VARS[t]=v;return v}
+  if(t==='List '){const n=+tg.slice(1).join('');if(!Array.isArray(v)||!(n>=1&&n<=26))throw SYN;LISTS[n-1]=v.map(N);return v}
+  if(t==='Dim '&&(tg[1]==='Mat '||tg[1]==='Vct ')&&tg.length===3&&L(tg[2])){if(!Array.isArray(v)||v.length!==2)throw SYN;const m=N(v[0]),n=N(v[1]);if(!Number.isInteger(m)||!Number.isInteger(n)||m<1||n<1||m>99||n>99)throw DIM;
+    const M=mzero(m,n);if(tg[1]==='Vct '&&!isVec(M))throw DIM;(tg[1]==='Mat '?MATS:VCTS)[tg[2]]=M;return M}
+  if((t==='Mat '||t==='Vct ')&&L(tg[1])){const st=t==='Mat '?MATS:VCTS,nm=tg[1];
+    if(tg.length===2){if(!isM(v))throw SYN;if(t==='Vct '&&!isVec(v))throw DIM;st[nm]=new Mx(v.d.map(r=>r.slice()));return v}
+    if(tg[2]==='['&&tg[tg.length-1]===']'){if(isM(v)||Array.isArray(v))throw MA;const M=st[nm];if(!M)throw DIM;const inn=tg.slice(3,-1),k=inn.indexOf(',');let r,c;
+      if(k<0){const i=N(compile(inn)());if(M.d.length===1){r=1;c=i}else{r=i;c=1}}else{r=N(compile(inn.slice(0,k))());c=N(compile(inn.slice(k+1))())}
+      if(!M.d[r-1]||M.d[r-1][c-1]===undefined)throw DIM;M.d[r-1][c-1]=v;return v}}
+  throw SYN}
+const add=(a,b)=>isM(a)||isM(b)?mop(0,a,b):isC(a)||isC(b)?cop(0,a,b):isF(a)&&isF(b)?mkfr(a.p*b.q+b.p*a.q,a.q*b.q):N(a)+N(b);
+const sub=(a,b)=>isM(a)||isM(b)?mop(1,a,b):isC(a)||isC(b)?cop(1,a,b):isF(a)&&isF(b)?mkfr(a.p*b.q-b.p*a.q,a.q*b.q):N(a)-N(b);
+const mul=(a,b)=>isM(a)||isM(b)?mop(2,a,b):isC(a)||isC(b)?cop(2,a,b):isF(a)&&isF(b)?mkfr(a.p*b.p,a.q*b.q):N(a)*N(b);
+const div=(a,b)=>{if(isM(a)||isM(b))return mop(3,a,b);if(isC(a)||isC(b))return cop(3,a,b);if(N(b)===0)throw MA;return isF(a)&&isF(b)?mkfr(a.p*b.q,a.q*b.p):N(a)/N(b)};
+const neg=a=>isM(a)?mmap(a,neg):isC(a)?new Cx(-a.re,-a.im):isF(a)?new Fr(-a.p,a.q):-a;
 const cl=r=>Math.abs(r)<1e-14?0:+r.toPrecision(15);
-function pw(a,b){if(isC(a)||isC(b))return cpow(a,b);const x=N(a),y=N(b);
+function pw(a,b){if(isM(a))return mpow(a,b);if(isM(b))throw MA;if(isC(a)||isC(b))return cpow(a,b);const x=N(a),y=N(b);
   if(isF(a)&&isF(b)&&b.q===1&&Math.abs(b.p)<=300){if(a.p===0){if(b.p<=0)throw MA;return a}
     const e=Math.abs(b.p),P=Math.pow(a.p,e),Q=Math.pow(a.q,e);if(Math.abs(P)<1e15&&Q<1e15)return b.p<0?mkfr(Q,P):mkfr(P,Q)}
   let r;if(x<0&&isF(b)&&b.q>1&&b.q%2===1){r=cl(b.q===3&&b.p===1?Math.cbrt(-x):Math.pow(-x,y));if(Math.abs(b.p)%2===1)r=-r}
@@ -174,7 +207,7 @@ function sqrtv(a){if(isC(a))return cpow(a,.5);const x=N(a);if(x<0){if(SETUP.cplx
 function fact(a){const n=N(a);if(!Number.isInteger(n)||n<0||n>69)throw MA;let r=1;for(let i=2;i<=n;i++)r*=i;return n<18?I(r):r}
 function perm(a,b){const n=N(a),r=N(b);if(!Number.isInteger(n)||!Number.isInteger(r)||r<0||r>n)throw MA;let x=1;for(let i=0;i<r;i++)x*=n-i;return x<1e15?I(x):x}
 function comb(a,b){const n=N(a),r=N(b);if(!Number.isInteger(n)||!Number.isInteger(r)||r<0||r>n)throw MA;let x=1;for(let i=1;i<=r;i++)x=x*(n-r+i)/i;x=Math.round(x);return x<1e15?I(x):x}
-function fmt(x,dig){dig=dig||10;if(isC(x))return cstr(x,dig);if(Array.isArray(x))return'{'+x.map(e=>fmt(e,dig)).join(',')+'}';x=N(x);if(typeof x!=='number'||!isFinite(x))return'ERROR';if(x===0)return'0';
+function fmt(x,dig){dig=dig||10;if(isC(x))return cstr(x,dig);if(isM(x))return'['+x.d.map(r=>'['+r.map(e=>fmt(e,dig)).join(',')+']').join('')+']';if(Array.isArray(x))return'{'+x.map(e=>fmt(e,dig)).join(',')+'}';x=N(x);if(typeof x!=='number'||!isFinite(x))return'ERROR';if(x===0)return'0';
   const a=Math.abs(x),lo=SETUP.disp==='Norm2'?1e-9:1e-2;
   if(a>=1e10||a<lo){let[m,e]=x.toExponential(dig-1).split('e');if(m.includes('.'))m=m.replace(/\.?0+$/,'');e=+e;return m+'E'+(e<0?'-':'+')+String(Math.abs(e)).padStart(2,'0')}
   let s=x.toPrecision(dig);if(s.includes('e'))s=String(+s);if(s.includes('.'))s=s.replace(/\.?0+$/,'');return s}
@@ -200,11 +233,14 @@ const PFX={
   'tan⁻¹ ':x=>cl(Math.atan(N(x))/angK()),
   'log ':x=>{const r=cln(x);return isC(r)?cop(3,r,Math.LN10):cl(Math.log10(N(x)))},
   'ln ':x=>cln(x),
+  'Det ':x=>{if(!isM(x))throw SYN;return mdet(x)},'Trn ':x=>{if(!isM(x))throw SYN;return new Mx(x.d[0].map((_,j)=>x.d.map(r=>r[j])))},
+  'Ref ':x=>{if(!isM(x))throw SYN;return new Mx(melim(x,false,true).d)},'Rref ':x=>{if(!isM(x))throw SYN;return new Mx(melim(x,true,true).d)},
+  'Identity ':x=>{const n=N(x);if(!Number.isInteger(n)||n<1||n>99)throw DIM;return mident(n)},'Dim ':x=>{if(isM(x))return[I(x.d.length),I(x.d[0].length)];if(Array.isArray(x))return I(x.length);throw SYN},
   'Arg ':x=>{const z=cx(x);return cl(Math.atan2(z.im,z.re)/angK())},'Conjg ':x=>isC(x)?new Cx(x.re,-x.im):x,'ReP ':x=>isC(x)?x.re:x,'ImP ':x=>isC(x)?x.im:0,
   'Int ':x=>Math.trunc(N(x)),'Frac ':x=>{x=N(x);return cl(x-Math.trunc(x))},'Intg ':x=>Math.floor(N(x))};
 const isDig=t=>typeof t==='string'&&t.length===1&&((t>='0'&&t<='9')||t==='.');
 const isVarTok=t=>typeof t==='string'&&(t in VARS||t==='π'||t==='e'||t==='i'||t==='Ans'||t==='T10'||t in SEQTOK);
-const startsP=t=>t!==undefined&&(typeof t==='object'?t.t!=='pow':(isDig(t)||isVarTok(t)||t==='('||t in PFX||t in FCALL||t==='Ran#'||t==='fY'));
+const startsP=t=>t!==undefined&&(typeof t==='object'?t.t!=='pow':(isDig(t)||isVarTok(t)||t==='('||t in PFX||t in FCALL||t==='Ran#'||t==='fY'||t==='Mat '||t==='Vct '||t==='List '));
 const withX=(f,x)=>{const o=VARS.X;VARS.X=x;try{return N(f())}finally{VARS.X=o}};
 function nderiv(F,x){const h=1e-3*Math.max(1,Math.abs(x));return(F(x-2*h)-8*F(x-h)+8*F(x+h)-F(x+2*h))/(12*h)}
 function nderiv2(F,x){const h=1e-2*Math.max(1,Math.abs(x));return(-F(x-2*h)+16*F(x-h)-30*F(x)+16*F(x+h)-F(x+2*h))/(12*h*h)}
@@ -218,6 +254,15 @@ const FCALL={
   'SolveN(':a=>{if(!a.length)throw SYN;const n=a.length,lo=n>=4?N(a[2]()):n===3?N(a[1]()):-100,hi=n>=4?N(a[3]()):n===3?N(a[2]()):100;if(!(hi>lo))throw MA;const F=safeX(a[0]),r=roots(F,lo,hi,4000);if(!r.length)throw{msg:'No Solution'};
     return r.slice(0,10).map(x=>{let y=x;for(let i=0;i<6;i++){const h=1e-6*Math.max(1,Math.abs(y)),d=(F(y+h)-F(y-h))/(2*h),f=F(y);if(!isFinite(d)||!d||!isFinite(f))break;const ny=y-f/d;if(!isFinite(ny)||Math.abs(ny-x)>1e-6*Math.max(1,Math.abs(x)))break;y=ny}return y===0?0:cl(y)})},
   'FMin(':a=>fext(a,false),'FMax(':a=>fext(a,true),
+  'Augment(':a=>{if(a.length!==2)throw SYN;const A=a[0](),B=a[1]();if(!isM(A)||!isM(B))throw SYN;if(A.d.length!==B.d.length)throw DIM;return new Mx(A.d.map((r,i)=>r.concat(B.d[i])))},
+  'Fill(':a=>{if(a.length!==2||!a[1].ref)throw SYN;const v=a[0](),rf=a[1].ref,o=rf.st[rf.nm];if(!o)throw DIM;if(isM(v)||Array.isArray(v))throw MA;return rf.st[rf.nm]=mmap(o,()=>v)},
+  'Mat→List(':a=>{if(a.length!==2)throw SYN;const M=a[0](),c=N(a[1]());if(!isM(M))throw SYN;if(M.d[0][c-1]===undefined)throw DIM;return M.d.map(r=>r[c-1])},
+  'DotP(':a=>{if(a.length!==2)throw SYN;return vdot(vflat(a[0]()),vflat(a[1]()))},
+  'CrossP(':a=>{if(a.length!==2)throw SYN;const A=a[0](),u=vflat(A).slice(),v=vflat(a[1]()).slice();if(u.length!==v.length||u.length<2||u.length>3)throw DIM;if(u.length===2){u.push(I(0));v.push(I(0))}
+    return vlike(A,[sub(mul(u[1],v[2]),mul(u[2],v[1])),sub(mul(u[2],v[0]),mul(u[0],v[2])),sub(mul(u[0],v[1]),mul(u[1],v[0]))])},
+  'Angle(':a=>{if(a.length!==2)throw SYN;const u=vflat(a[0]()),v=vflat(a[1]()),d=N(vnorm(u))*N(vnorm(v));if(!d)throw MA;return cl(Math.acos(clamp(N(vdot(u,v))/d,-1,1))/angK())},
+  'UnitV(':a=>{if(a.length!==1)throw SYN;const A=a[0](),n=vnorm(vflat(A));if(N(n)===0)throw MA;return mmap(A,x=>div(x,n))},
+  'Norm(':a=>{if(a.length!==1)throw SYN;const A=a[0]();if(!isM(A))throw SYN;return vnorm([].concat(...A.d))},
   'RanInt#(':a=>{if(a.length<2)throw SYN;const lo=N(a[0]()),hi=N(a[1]());if(!Number.isInteger(lo)||!Number.isInteger(hi)||hi<lo)throw MA;return I(lo+Math.floor(Math.random()*(hi-lo+1)))}};
 function compile(list){const P={l:list,i:0};if(!list.length)throw SYN;const f=pExpr(P);if(P.i<list.length)throw SYN;return f}
 function pExpr(P){let a=pTerm(P);for(;;){const t=P.l[P.i];if(t==='+'||t==='-'){P.i++;const b=pTerm(P),x=a,op=t==='+'?add:sub;a=()=>op(x(),b())}else return a}}
@@ -239,7 +284,7 @@ function pPrim(P){const t=P.l[P.i];if(t===undefined)throw SYN;
     case'mixed':{const w=compile(k[0]),a=compile(k[1]),b=compile(k[2]);return()=>add(w(),div(a(),b()))}
     case'sqrt':{const a=compile(k[0]);return()=>sqrtv(a())}
     case'nroot':{const n=compile(k[0]),a=compile(k[1]);return()=>pw(a(),div(I(1),n()))}
-    case'abs':{const a=compile(k[0]);return()=>{const v=a();return isC(v)?Math.hypot(v.re,v.im):isF(v)?new Fr(Math.abs(v.p),v.q):Math.abs(v)}}
+    case'abs':{const a=compile(k[0]);return()=>{const v=a();return isM(v)?mmap(v,absv):absv(v)}}
     case'logab':{const b=compile(k[0]),a=compile(k[1]);return()=>{const x=N(a()),y=N(b());if(x<=0||y<=0||y===1)throw MA;return cl(Math.log(x)/Math.log(y))}}
     case'ddx':case'd2':{const f=compile(k[0]),v=compile(k[1]),D=t.t==='ddx'?nderiv:nderiv2,pr=t.t==='ddx'?11:8;return()=>{const r=D(x=>withX(f,x),N(v()));if(!isFinite(r))throw MA;return cl(+r.toPrecision(pr))}}
     case'int':{const f=compile(k[0]),a=compile(k[1]),b=compile(k[2]);return()=>{const r=simpson(x=>withX(f,x),N(a()),N(b()));if(!isFinite(r))throw MA;return cl(+r.toPrecision(12))}}
@@ -258,6 +303,16 @@ function pPrim(P){const t=P.l[P.i];if(t===undefined)throw SYN;
     let d='';while(d.length<2&&isDig(P.l[P.i])&&P.l[P.i]!=='.'&&+(d+P.l[P.i])<=20)d+=P.l[P.i++];const n=+d;if(!d||n<1)throw SYN;
     let arg=null;if(P.l[P.i]==='('){P.i++;arg=pExpr(P);if(P.l[P.i]===')')P.i++;else if(P.i<P.l.length)throw SYN}
     return()=>{const nd=FN[n-1].nodes;if(!nd.length)throw{msg:'Undefined'};if(YDEPTH>8)throw MA;const f=compile(nd),o=VARS.X;if(arg)VARS.X=arg();YDEPTH++;try{return f()}finally{VARS.X=o;YDEPTH--}}}
+  if(t==='Mat '||t==='Vct '){const nm=P.l[P.i++],vc=t==='Vct ';if(!(nm==='Ans'||(typeof nm==='string'&&/^[A-Z]$/.test(nm))))throw SYN;
+    const get=()=>{const M=nm==='Ans'?(vc?VCTANS:MATANS):(vc?VCTS:MATS)[nm];if(!M)throw DIM;return M};
+    if(P.l[P.i]==='['){P.i++;const a=pExpr(P);let b=null;if(P.l[P.i]===','){P.i++;b=pExpr(P)}if(P.l[P.i]!==']')throw SYN;P.i++;
+      return()=>{const M=get();let r=N(a()),c;if(b)c=N(b());else if(M.d.length===1){c=r;r=1}else c=1;const row=M.d[r-1];if(!row||row[c-1]===undefined)throw DIM;return row[c-1]}}
+    const f=()=>get();f.ref={st:vc?VCTS:MATS,nm};return f}
+  if(t==='['){const rows=[];while(P.l[P.i]==='['){P.i++;const r=[pExpr(P)];while(P.l[P.i]===','){P.i++;r.push(pExpr(P))}if(P.l[P.i]!==']')throw SYN;P.i++;rows.push(r)}
+    if(P.l[P.i]===']')P.i++;else if(P.i<P.l.length)throw SYN;if(!rows.length||rows.some(r=>r.length!==rows[0].length))throw SYN;
+    return()=>new Mx(rows.map(r=>r.map(f=>{const v=f();if(isM(v)||Array.isArray(v))throw MA;return v})))}
+  if(t==='{'){const el=[];if(P.l[P.i]!=='}')for(;;){el.push(pExpr(P));if(P.l[P.i]===','){P.i++;continue}break}if(P.l[P.i]==='}')P.i++;else if(P.i<P.l.length)throw SYN;return()=>el.map(f=>f())}
+  if(t==='List '){let d='';while(isDig(P.l[P.i])&&P.l[P.i]!=='.')d+=P.l[P.i++];const n=+d;if(!(n>=1&&n<=26))throw SYN;return()=>{if(!LISTS[n-1].length)throw DIM;return LISTS[n-1].slice()}}
   if(t==='i'){const v=new Cx(0,1);return()=>v}
   if(t in FCALL){const args=[];if(P.l[P.i]!==')')for(;;){let a=pExpr(P);if(P.l[P.i]==='='){P.i++;const b=pExpr(P),x=a;a=()=>sub(x(),b())}args.push(a);const u=P.l[P.i];if(u===','){P.i++;continue}if(u===')'){P.i++;break}if(u===undefined)break;throw SYN}
     else P.i++;const f=FCALL[t];return()=>f(args)}
@@ -276,15 +331,16 @@ function exactNodes(v){if(typeof v!=='number'||!isFinite(v))return null;const f=
     const pf=toFrac(v-sg*n/d*Math.sqrt(m),12,1e-12);if(!pf)continue;const P=mkfr(pf[0],pf[1]),num=[...(n===1?[]:dg(n)),{t:'sqrt',s:[dg(m)]}],out=P.p?frNodes(P):[];
     out.push(sg<0?(P.p?'-':'(-)'):'+');if(!P.p&&sg>0)out.pop();out.push(...(d===1?num:[{t:'frac',s:[num,dg(d)]}]));return out}
   return null}
-function mkResult(v,nodes){if(Array.isArray(v)){const ex=v.map(exactNodes);return ex.some(e=>e)?{v,ex}:{v}}
+function mkResult(v,nodes){if(isM(v))return{v};if(Array.isArray(v)){const ex=v.map(exactNodes);return ex.some(e=>e)?{v,ex}:{v}}
   if(isF(v)||isC(v))return{v};if(typeof v!=='number'||!isFinite(v))throw MA;const r={v};
   if(has(nodes,n=>n==='Solve(')){const e=exactNodes(v);if(e){r.exn=e;return r}}
-  if(has(nodes,n=>n.t==='sqrt'||n.t==='nroot'||n==='sin '||n==='cos '||n==='tan ')){const s=toSurd(v);if(isF(s))r.v=s;else if(s)r.surd=s}
+  if(has(nodes,n=>n.t==='sqrt'||n.t==='nroot'||n==='sin '||n==='cos '||n==='tan '||n==='Norm(')){const s=toSurd(v);if(isF(s))r.v=s;else if(s)r.surd=s}
   if(!r.surd&&!isF(r.v)&&v!==0&&has(nodes,n=>n==='π'||(SETUP.angle==='Rad'&&/⁻¹/.test(n)))){const p=toFrac(v/Math.PI,1000,1e-12);if(p)r.pi=p}
   return r}
 function frNodes(v,mix){if(v.q===1)return s2n(v.p);const ng=v.p<0,p=Math.abs(v.p),q=v.q;let n;
   if(mix&&p>q)n={t:'mixed',s:[dg(Math.floor(p/q)),dg(p%q),dg(q)]};else n={t:'frac',s:[dg(p),dg(q)]};return ng?['(-)',n]:[n]}
 function resNodes(r){const v=r.v,lin=r.dec||SETUP.io==='Linear';
+  if(isM(v))return[{t:'mat',r:v.d.length,c:v.d[0].length,s:[].concat(...v.d).map(x=>isF(x)&&!lin?frNodes(x,(SETUP.frac==='ab/c')!==!!r.mix):s2n(fmt(x)))}];
   if(Array.isArray(v)&&r.ex&&!lin){const o=['{'];v.forEach((x,i)=>{if(i)o.push(',');o.push(...(r.ex[i]||s2n(fmt(x))))});o.push('}');return o}
   if(r.exn&&!lin)return r.exn;
   if(isC(v)||Array.isArray(v))return s2n(fmt(v));if(r.dec||SETUP.io==='Linear')return s2n(fmt(v));
@@ -309,6 +365,8 @@ function mlay(list,s){const it=[];let x=0,up=10*s,dn=10*s,pu=10*s;const s2=Math.
       case'ddx':case'd2':{const A=mlay(k[0],s),V=mlay(k[1],s3),hd=(n.t==='d2'?2.6:2)*CW*s;b={w:hd+14*s+A.w+2*CW*s3+V.w,up:Math.max(13*s,A.up),dn:Math.max(13*s,A.dn,3*s+V.up+V.dn),c:[A,V],hd};break}
       case'int':{const A=mlay(k[0],s),L=mlay(k[1],s3),U=mlay(k[2],s3),lw=Math.max(L.w,U.w),au=Math.max(A.up,10*s),ad=Math.max(A.dn,10*s);b={w:9*s+lw+2+A.w+2*CW*s,up:au+U.up+U.dn-3*s,dn:ad+L.up+L.dn-3*s,c:[A,L,U],lw,au,ad};break}
       case'sum':{const A=mlay(k[0],s),V=mlay(k[1],s3),L=mlay(k[2],s3),U=mlay(k[3],s3),bw=V.w+CW*s3+L.w,cw=Math.max(16*s,bw,U.w);b={w:cw+14*s+A.w,up:Math.max(A.up,11*s+U.up+U.dn),dn:Math.max(A.dn,11*s+L.up+L.dn),c:[A,V,L,U],cw,bw};break}
+      case'mat':{const B=k.map(q=>mlay(q,s2)),cw=[],rh=[];for(let i=0;i<n.r;i++)for(let j=0;j<n.c;j++){const q=B[i*n.c+j];cw[j]=Math.max(cw[j]||0,q.w);rh[i]=Math.max(rh[i]||0,q.up+q.dn+2)}
+        const hh=rh.reduce((x,y)=>x+y,0);b={w:cw.reduce((x,y)=>x+y,0)+8*(n.c-1)+14,up:hh/2,dn:hh/2,c:B,cw,rh};break}
       default:b={w:CW*s,up:10*s,dn:10*s}}}
     b.x=x;b.n=n;x+=b.w;up=Math.max(up,b.up);dn=Math.max(dn,b.dn);pu=b.up;it.push(b)}
   return{w:list.length?x:CW*s,up,dn,it,list,s}}
@@ -337,6 +395,8 @@ function mdraw(B,x,cy,col){const s=B.s,L=B.list,isCur=CUR&&CUR.l===L;
         mstr('x=',px+CW*c[1].s,cy+3*s+c[1].up,20*c[1].s,col);mdraw(c[1],px+2*CW*c[1].s,cy+3*s+c[1].up,col);break}
       case'int':{const t0=cy-b.au-1,b0=cy+b.ad+1;g.strokeStyle=col;g.lineWidth=lw;g.beginPath();g.moveTo(bx+8*s,t0+2);g.quadraticCurveTo(bx+4.5*s,t0-1,bx+4.5*s,t0+6*s);g.lineTo(bx+4.5*s,b0-6*s);g.quadraticCurveTo(bx+4.5*s,b0+1,bx+1,b0-2);g.stroke();
         mdraw(c[2],bx+9*s,cy-b.up+c[2].up,col);mdraw(c[1],bx+9*s,cy+b.dn-c[1].dn,col);const ax=bx+9*s+b.lw+2;mdraw(c[0],ax,cy,col);drawTok('dx',ax+c[0].w,cy,s,col);break}
+      case'mat':{const t0=cy-b.up+1,b0=cy+b.dn-1,xr=bx+b.w-2;g.strokeStyle=col;g.lineWidth=lw;g.beginPath();g.moveTo(bx+6,t0);g.lineTo(bx+2,t0);g.lineTo(bx+2,b0);g.lineTo(bx+6,b0);g.moveTo(xr-4,t0);g.lineTo(xr,t0);g.lineTo(xr,b0);g.lineTo(xr-4,b0);g.stroke();
+        let y=cy-b.up;for(let i=0;i<n.r;i++){let x=bx+7;for(let j=0;j<n.c;j++){const q=c[i*n.c+j];mdraw(q,x+b.cw[j]-q.w,y+(b.rh[i]-q.up-q.dn)/2+q.up,col);x+=b.cw[j]+8}y+=b.rh[i]}break}
       case'sum':{mstr('Σ',bx+b.cw/2,cy+1,22*s,col);mdraw(c[3],bx+(b.cw-c[3].w)/2,cy-11*s-c[3].dn,col);
         let px=bx+(b.cw-b.bw)/2;const by=cy+11*s+c[2].up;mdraw(c[1],px,by,col);px+=c[1].w;mstr('=',px+CW*c[1].s/2,by,20*c[1].s,col);mdraw(c[2],px+CW*c[1].s,by,col);
         px=bx+b.cw;mstr('(',px+3.5*s,cy+1,20*s,col);mdraw(c[0],px+7*s,cy,col);mstr(')',px+7*s+c[0].w+3.5*s,cy+1,20*s,col);break}
@@ -348,7 +408,7 @@ function drawMath(nodes,x,cy,maxW,col,s,ed,right){const B=mlay(nodes,s||1);let o
   clip(x-2,cy-B.up-4,maxW+4,B.up+B.dn+8);mdraw(B,x-ox,cy,col);unclip();CUR=null;return B}
 
 /* ================= expression editor ================= */
-const INS={'+':'+','-':'-','×':'×','÷':'÷','NEG':'(-)','(':'(',')':')',',':',','STO':'→','=':'=','EXP':'ᴇ','π':'π','Ans':'Ans','.':'.','θ':'θ','r':'r','i':'i','∠':'∠',
+const INS={'+':'+','-':'-','×':'×','÷':'÷','NEG':'(-)','(':'(',')':')',',':',','STO':'→','=':'=','EXP':'ᴇ','π':'π','Ans':'Ans','.':'.','θ':'θ','r':'r','i':'i','∠':'∠','[':'[',']':']','{':'{','}':'}','Mat':'Mat ','List':'List ',
   log:'log ',ln:'ln ',sin:'sin ',cos:'cos ',tan:'tan ',asin:'sin⁻¹ ',acos:'cos⁻¹ ',atan:'tan⁻¹ '};
 const isStart=k=>/^[0-9A-Z]$/.test(k)||['.','NEG','(','frac','mixed','sqrt','nroot','cbrt','π','Ans','log','ln','sin','cos','tan','asin','acos','atan','10^','e^','XTT','-','r','θ','i'].includes(k);
 class Ed{
@@ -528,7 +588,7 @@ const RUNH=[];
 class Run extends Scr{
   constructor(){super();this.ed=new Ed();this.sub='';this.hs=null}
   fk(){return{'':['JUMP','DELETE','▸MAT/VCT','MATH'],jump:['~TOP','~BOTTOM'],del:['~DEL-LINE','~DEL-ALL'],math:['MAT/VCT','~logab','~Abs','~d/dx','~d²/dx²','~▷'],math2:['~∫dx','~Σ(','','','','~▷'],
-    vars:['V-WIN','FACTOR','STAT','GRAPH'],vgraph:['~Y','~r','~Xt','~Yt','~X'],optn:['CALC','PROB','COMPLEX','NUMERIC'],calc:['~Solve','~d/dx','~d²/dx²','~∫dx','~SolveN','~▷'],calc2:['~FMin','~FMax','~Σ(','~logab','','~▷'],prob:['~x!','~nPr','~nCr','RAND'],rand:['~Ran#','~RanInt#'],cplx:['~i','~Abs','~Arg','~Conjg','~ReP','~ImP'],num:['~Abs','~Int','~Frac','~Intg']}[this.sub]}
+    vars:['V-WIN','FACTOR','STAT','GRAPH'],vgraph:['~Y','~r','~Xt','~Yt','~X'],optn:['','MAT/VCT','COMPLEX','CALC','PROB','NUMERIC'],mat:['~Mat','~Mat→Lst','~Det','~Trn','~Augment','~▷'],mat2:['~Identity','~Dim','~Fill(','~Ref','~Rref','~▷'],mat3:['~Vct','~DotP(','~CrossP(','~Angle(','~UnitV(','~▷'],mat4:['~Norm(','','','','','~▷'],calc:['~Solve','~d/dx','~d²/dx²','~∫dx','~SolveN','~▷'],calc2:['~FMin','~FMax','~Σ(','~logab','','~▷'],prob:['~x!','~nPr','~nCr','RAND'],rand:['~Ran#','~RanInt#'],cplx:['~i','~Abs','~Arg','~Conjg','~ReP','~ImP'],num:['~Abs','~Int','~Frac','~Intg']}[this.sub]}
   draw(){const items=[];for(const h of RUNH){items.push({b:mlay(h.nodes,1)});items.push({b:mlay(resNodes(h.r),1),r:1})}
     const eb=mlay(this.ed.root,1);items.push({b:eb,ed:1});let tot=0;for(const it of items){it.h=Math.max(24,it.b.up+it.b.dn+4);it.y=tot;tot+=it.h}
     if(this.hs!=null&&this.hs>=items.length-1)this.hs=null;
@@ -541,18 +601,20 @@ class Run extends Scr{
     unclip();if(tot>168)rect(W-4,24,3,168,'#2a4be0');fbar(this.fk())}
   click(x,y){const r=(this.rects||[]).find(q=>y>=q[0]&&y<q[1]);this.hs=r?r[2]:null}
   exec(){const nodes=this.ed.root;if(!nodes.length)return;const j=nodes.lastIndexOf('→');let v;
-    if(j>=0){const t=nodes[j+1];if(nodes.length!==j+2||!(t in VARS))throw SYN;v=compile(nodes.slice(0,j))();VARS[t]=v}else v=compile(nodes)();
-    const r=mkResult(v,nodes);ANS=r.v;RUNH.push({nodes,r});if(RUNH.length>40)RUNH.shift();this.ed=new Ed()}
+    if(j>=0){if(j===nodes.length-1)throw SYN;v=assign(nodes.slice(j+1),compile(nodes.slice(0,j))())}else v=compile(nodes)();
+    const r=mkResult(v,nodes);if(isM(r.v)){MATANS=r.v;if(isVec(r.v))VCTANS=r.v}else ANS=r.v;RUNH.push({nodes,r});if(RUNH.length>40)RUNH.shift();this.ed=new Ed()}
   key(k){const s=this.sub,e=this.ed;
     if(k==='QUIT'){this.sub='';return}
-    if(k==='EXIT'){this.sub={calc:'optn',calc2:'optn',prob:'optn',rand:'prob',cplx:'optn',num:'optn',math2:'math',vgraph:'vars'}[s]||'';return}
+    if(k==='EXIT'){this.sub={calc:'optn',calc2:'optn',prob:'optn',rand:'prob',cplx:'optn',num:'optn',math2:'math',vgraph:'vars',mat:'optn',mat2:'optn',mat3:'optn',mat4:'optn'}[s]||'';return}
     if(/^F[1-6]$/.test(k)){const n=+k[1];
-      if(s===''){if(n===3)note('MAT/VCT is not supported');else this.sub=['jump','del','','math'][n-1]||''}
+      if(s===''){if(n===3)push(new MatList('Mat'));else this.sub=['jump','del','','math'][n-1]||''}
       else if(s==='jump'){this.hs=n===1&&RUNH.length?0:null;this.sub=''}
       else if(s==='del'){if(n===1)RUNH.pop();else if(n===2)RUNH.length=0;this.sub='';this.hs=null}
       else if(s==='math'){if(n===1)note('MAT/VCT is not supported');else if(n===2)e.st('logab',[[],[]],0);else if(n===3)e.st('abs',[[]],0);else if(n===4)e.st('ddx',[[],[]],0);else if(n===5)e.st('d2',[[],[]],0);else this.sub='math2'}
       else if(s==='math2'){if(n===1)e.st('int',[[],[],[]],0);else if(n===2)e.st('sum',[[],[],[],[]],0);else if(n===6)this.sub='math'}
-      else if(s==='optn'){this.sub=['calc','prob','cplx','num'][n-1]||s}
+      else if(s==='optn'){this.sub=[0,'mat','cplx','calc','prob','num'][n-1]||s}
+      else if(s==='mat'||s==='mat2'||s==='mat3'||s==='mat4'){const tk={mat:['Mat ','Mat→List(','Det ','Trn ','Augment('],mat2:['Identity ','Dim ','Fill(','Ref ','Rref '],mat3:['Vct ','DotP(','CrossP(','Angle(','UnitV('],mat4:['Norm(']}[s];
+        if(n===6)this.sub={mat:'mat2',mat2:'mat3',mat3:'mat4',mat4:'mat'}[s];else if(tk[n-1])e.ins(tk[n-1])}
       else if(s==='calc'){if(n===1)e.ins('Solve(');else if(n===2)e.st('ddx',[[],[]],0);else if(n===3)e.st('d2',[[],[]],0);else if(n===4)e.st('int',[[],[],[]],0);else if(n===5)e.ins('SolveN(');else this.sub='calc2'}
       else if(s==='calc2'){if(n===1)e.ins('FMin(');else if(n===2)e.ins('FMax(');else if(n===3)e.st('sum',[[],[],[],[]],0);else if(n===4)e.st('logab',[[],[]],0);else if(n===6)this.sub='calc'}
       else if(s==='prob'){if(n===4)this.sub='rand';else{const t=['!','nPr','nCr'][n-1];if(t)e.ins(t)}}
@@ -1287,6 +1349,65 @@ class PicPlot extends Plot{
     else if(s==='regx'){if(F===1)this.doReg(1,false);else if(F===2)this.doReg(1,true)}}
 }
 
+/* ================= MATRIX / VECTOR EDITOR ================= */
+class MatList extends Scr{
+  constructor(kind){super();this.kind=kind;this.i=0;this.t=0}
+  get S(){return this.kind==='Mat'?MATS:VCTS}
+  fk(){return['DELETE','DEL-ALL','DIM','CSV','','~M⇔V']}
+  draw(){const S=this.S;txt(this.kind==='Mat'?'Matrix':'Vector',2,24,{c:TB});if(this.i<this.t)this.t=this.i;if(this.i>this.t+5)this.t=this.i-5;
+    for(let r=0;r<6;r++){const i=this.t+r,L=String.fromCharCode(65+i),M=S[L],y=48+r*24,sel=i===this.i;if(sel)rect(0,y,W-14,24,'#000');
+      txt((this.kind+' '+L).padEnd(11)+':'+(M?String(M.d.length).padStart(3)+'×'+String(M.d[0].length).padStart(3):'None'),2,y,{c:sel?'#fff':'#000'})}
+    if(this.t+6<26)sm('↓',372,180,{c:MAG,sz:16});if(this.t>0)sm('↑',372,60,{c:MAG,sz:16});fbar(this.fk())}
+  dim(){const S=this.S,L=String.fromCharCode(65+this.i),k=this.kind,o=S[L]?{m:S[L].d.length,n:S[L].d[0].length}:{m:k==='Vct'?1:2,n:2};
+    const f=new Form('Dimension m×n',[{l:' m ',get:()=>o.m,set:v=>{o.m=v}},{l:' n ',get:()=>o.n,set:v=>{o.n=v}}]);
+    f.onExe=()=>{if(f.i===0){f.i=1;return}if(!Number.isInteger(o.m)||!Number.isInteger(o.n)||o.m<1||o.n<1||o.m>99||o.n>99||(k==='Vct'&&o.m>1&&o.n>1))throw DIM;closeTop();S[L]=mzero(o.m,o.n);push(new MatEdit(k,L))};push(f)}
+  key(k,K){const S=this.S,L=String.fromCharCode(65+this.i),nm=this.kind==='Mat'?'Matrix':'Vector';
+    if(k==='UP')this.i=(this.i+25)%26;else if(k==='DOWN')this.i=(this.i+1)%26;else if(k==='EXIT')pop();
+    else if(k==='F1'){if(S[L])push(new Confirm('Delete '+nm+'?',()=>{delete S[L]}))}
+    else if(k==='F2')push(new Confirm('Delete All '+(this.kind==='Mat'?'Matrices':'Vectors')+'?',()=>{for(const x in S)delete S[x]}));
+    else if(k==='F3')this.dim();else if(k==='EXE'){if(S[L])push(new MatEdit(this.kind,L));else this.dim()}
+    else if(k==='F4')note('CSV is not supported');
+    else if(k==='F6'){closeTop();push(new MatList(this.kind==='Mat'?'Vct':'Mat'))}
+    else{const ch=/^[A-Z]$/.test(k)?k:K&&K.a;if(ch&&/^[A-Z]$/.test(ch))this.i=ch.charCodeAt(0)-65}}
+}
+class MatEdit extends Scr{
+  constructor(kind,L){super();this.kind=kind;this.L=L;this.r=0;this.c=0;this.tr=0;this.tc=0;this.ed=null;this.sub=''}
+  get M(){return(this.kind==='Mat'?MATS:VCTS)[this.L]}
+  fk(){return{'':[this.kind==='Mat'?'ROW-OP':'','ROW','COLUMN','~EDIT'],rowop:['~SWAP','~×Row','~×Row+','~Row+'],row:['~DELETE','~INSERT','~ADD'],col:['~DELETE','~INSERT','~ADD']}[this.sub]}
+  draw(){const d=this.M.d,m=d.length,n=d[0].length;this.r=Math.min(this.r,m-1);this.c=Math.min(this.c,n-1);
+    if(this.r<this.tr)this.tr=this.r;if(this.r>this.tr+5)this.tr=this.r-5;if(this.c<this.tc)this.tc=this.c;if(this.c>this.tc+3)this.tc=this.c-3;
+    const cx=j=>30+(j+1)*84,vr=Math.min(6,m-this.tr),vc=Math.min(4,n-this.tc);sm(this.L,5,34,{sz:14,c:TB});
+    for(let j=0;j<vc;j++){sm(String(this.tc+j+1),cx(j)-40,34,{al:'center',sz:11});line(cx(j)-76,41.5,cx(j)-4,41.5,'#000')}
+    for(let i=0;i<vr;i++){const y=45+i*18,ri=this.tr+i;sm(String(ri+1),22,y+9,{al:'right',sz:11});
+      for(let j=0;j<vc;j++){const v=d[ri][this.tc+j],sel=ri===this.r&&this.tc+j===this.c;if(sel)rect(cx(j)-78,y,78,17,'#000');sm(isC(v)?fmt(v,4):fmtw(v,9),cx(j)-3,y+9,{al:'right',sz:12,c:sel?'#fff':'#000'})}}
+    const xb=cx(vc-1)+3,yb=45+vr*18;g.strokeStyle='#000';g.lineWidth=1;g.beginPath();g.moveTo(30.5,44.5);g.lineTo(26.5,44.5);g.lineTo(26.5,yb+.5);g.lineTo(30.5,yb+.5);g.moveTo(xb-3.5,44.5);g.lineTo(xb+.5,44.5);g.lineTo(xb+.5,yb+.5);g.lineTo(xb-3.5,yb+.5);g.stroke();
+    if(this.ed)drawMath(this.ed.root,4,176,360,'#000',1,this.ed);else{const nd=resNodes({v:d[this.r][this.c]}),b=mlay(nd,.9);drawMath(nd,W-8-b.w,190-b.dn-2,b.w+2,'#000',.9)}
+    fbar(this.fk())}
+  next(){const d=this.M.d;if(++this.c>=d[0].length){if(this.r<d.length-1){this.c=0;this.r++}else this.c=d[0].length-1}}
+  ask(labels,cb){const vals=[],step=()=>push(new InputBox('Row Operation',labels[vals.length],null,v=>{vals.push(v);if(vals.length<labels.length)step();else cb(vals)}));step()}
+  key(k){const d=this.M.d,m=d.length,n=d[0].length,F=/^F[1-6]$/.test(k)?+k[1]:0,s=this.sub,vct=this.kind==='Vct';
+    if(this.ed){if(k==='EXE'){if(this.ed.root.length){const v=compile(this.ed.root)();if(isM(v)||Array.isArray(v)||(!isC(v)&&!isFinite(N(v))))throw MA;d[this.r][this.c]=v;this.next()}this.ed=null}
+      else if(k==='EXIT'||k==='AC')this.ed=null;else if(k==='UP'||k==='DOWN')this.ed.vert(k==='UP'?-1:1);else this.ed.key(k);return}
+    const row=x=>{if(!Number.isInteger(x)||x<1||x>m)throw MA;return x-1};
+    if(F&&s==='rowop'){this.sub='';
+      if(F===1)this.ask(['Row m','Row n'],([a,b])=>{a=row(a);b=row(b);[d[a],d[b]]=[d[b],d[a]]});
+      else if(F===2)this.ask(['k','Row m'],([q,a])=>{a=row(a);d[a]=d[a].map(x=>mul(x,toEx(q)))});
+      else if(F===3)this.ask(['k','Row m','Row n'],([q,a,b])=>{a=row(a);b=row(b);d[b]=d[b].map((x,j)=>add(x,mul(toEx(q),d[a][j])))});
+      else if(F===4)this.ask(['Row m','Row n'],([a,b])=>{a=row(a);b=row(b);d[b]=d[b].map((x,j)=>add(x,d[a][j]))});return}
+    if(F&&s==='row'){this.sub='';if(vct&&n>1&&m===1){note('Not possible for a row vector');return}
+      if(F===1){if(m>1)d.splice(this.r,1)}else if(F===2)d.splice(this.r,0,Array(n).fill(I(0)));else if(F===3){d.splice(this.r+1,0,Array(n).fill(I(0)));this.r++}return}
+    if(F&&s==='col'){this.sub='';if(vct&&m>1&&n===1){note('Not possible for a column vector');return}
+      if(F===1){if(n>1)d.forEach(r=>r.splice(this.c,1))}else if(F===2)d.forEach(r=>r.splice(this.c,0,I(0)));else if(F===3){d.forEach(r=>r.splice(this.c+1,0,I(0)));this.c++}return}
+    switch(k){
+      case'EXIT':if(s)this.sub='';else pop();break;
+      case'UP':this.r=Math.max(0,this.r-1);break;case'DOWN':this.r=Math.min(m-1,this.r+1);break;
+      case'LEFT':this.c=Math.max(0,this.c-1);break;case'RIGHT':this.c=Math.min(n-1,this.c+1);break;
+      case'EXE':this.next();break;
+      case'F1':if(!vct)this.sub='rowop';break;case'F2':this.sub='row';break;case'F3':this.sub='col';break;case'F4':this.ed=new Ed();break;
+      default:if(isStart(k)&&k!=='XTT'){this.ed=new Ed();this.ed.key(k)}}}
+}
+const toEx=x=>Number.isInteger(x)&&Math.abs(x)<1e15?I(x):x;
+
 /* ================= DISTRIBUTION ================= */
 function erfc(x){if(x<0)return 2-erfc(-x);if(x<2.5){let s=x,t=x;for(let n=1;n<90;n++){t*=-x*x/n;const d=t/(2*n+1);s+=d;if(Math.abs(d)<1e-18)break}return 1-2/Math.sqrt(Math.PI)*s}
   let t=0;for(let k=90;k>=1;k--)t=k/2/(x+t);return Math.exp(-x*x)/Math.sqrt(Math.PI)/(x+t)}
@@ -1373,7 +1494,7 @@ function press(id){const d=KD[id];if(!d)return;
   if(id==='ALPHA'){if(shift){alock=alpha=true;shift=false}else{alpha=!alpha;if(!alpha)alock=false}render();return}
   let k=id;if(shift){if(d.s!==undefined)k=d.s}else if(alpha&&d.a)k=d.a;
   shift=false;if(!alock)alpha=false;
-  if(['CAPTURE','CLIP','PASTE','INS','UNDO','CATALOG','List','Mat','{','}','[',']','PRGM','SPACE','"'].includes(k)){note(k+': not supported');render();return}
+  if(['CAPTURE','CLIP','PASTE','INS','UNDO','CATALOG','PRGM','SPACE','"'].includes(k)){note(k+': not supported');render();return}
   dispatch(k,d)}
 function logical(k){if(!power)return;NOTE=null;shift=false;if(!alock)alpha=false;dispatch(k,null)}
 function drawStatus(){rect(0,0,W,23,'#fff');line(0,23.5,W,23.5,'#7fa6dc');frame(4,5,10,14,'#000');rect(7,3,4,2,'#000');rect(6,9,6,8,'#3a3');
@@ -1388,7 +1509,7 @@ function render(){g.setTransform(SC,0,0,SC,0,0);CUR=null;CURPOS=null;
   try{topS().draw()}catch(e){console.error(e);g.restore();g.setTransform(SC,0,0,SC,0,0)}
   drawStatus();
   if(CURPOS&&blink)rect(CURPOS.x-1,CURPOS.y1,2,CURPOS.y2-CURPOS.y1,CURPOS.c)}
-function resetAll(){RUNH.length=0;ANS=0;for(const k in VARS)VARS[k]=0;FN.forEach(f=>{f.nodes=[];f.sel=false;f.color=null});MARKS.length=0;setWin(VW,-6.3,6.3,1,-3.1,3.1,1);setWin(PW,-6.3,6.3,1,-3.1,3.1,1);
+function resetAll(){RUNH.length=0;ANS=0;MATANS=VCTANS=null;for(const k in MATS)delete MATS[k];for(const k in VCTS)delete VCTS[k];for(const k in VARS)VARS[k]=0;FN.forEach(f=>{f.nodes=[];f.sel=false;f.color=null});MARKS.length=0;setWin(VW,-6.3,6.3,1,-3.1,3.1,1);setWin(PW,-6.3,6.3,1,-3.1,3.1,1);
   LISTS.forEach(l=>{l.length=0});REC.fs.forEach(t=>t.forEach(f=>{f.nodes=[];f.sel=false}));REC.type=0;REC.start=1;REC.end=5;REC.init=[[0,0],[0,0],[0,0]];Object.assign(TSET,{start:1,end:5,step:1});
   EQD.simul={};EQD.poly={};SOLV.nodes=[];SOLV.lo=-9e99;SOLV.hi=9e99;PP.pts.length=0;PP.reg=null;PP.pic=null;Object.assign(FIN,{n:0,I:0,PV:0,PMT:0,FV:0,PY:12,CY:12,sn:365,sI:0,sPV:0});
   Object.assign(SETUP,{io:'Math',frac:'d/c',draw:'Connect',angle:'Deg',coord:'On',grid:'Line',axes:'On',label:'On',disp:'Norm1',bg:null,cplx:'Real',deriv:'Off'});CON.marks.length=0;CON.color=null}
