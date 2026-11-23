@@ -49,8 +49,8 @@ body{background:radial-gradient(circle at 30% 15%,#3d4c66,#141924 70%);font-fami
 #help kbd{background:#2a3242;border:1px solid #4a556b;border-radius:4px;padding:0 5px;font:11px Menlo,Consolas,monospace;white-space:nowrap}
 #help p{margin:4px 0}
 @media(max-width:860px){#help{display:none}}
-#fs{background:none;border:1px solid #5a5f6b;color:#dfe4ee;border-radius:6px;font-size:14px;line-height:1;width:30px;height:24px;margin-left:10px;cursor:pointer;padding:0;vertical-align:middle}
-#fs:active{background:#3a4050}
+#fs,#pip{background:none;border:1px solid #5a5f6b;color:#dfe4ee;border-radius:6px;font-size:14px;line-height:1;width:30px;height:24px;margin-left:10px;cursor:pointer;padding:0;vertical-align:middle}
+#fs:active,#pip:active{background:#3a4050}
 #calc{-webkit-tap-highlight-color:transparent;-webkit-touch-callout:none}
 #hap{position:fixed;left:-99px;top:0;opacity:0;pointer-events:none}
 /* fill mode: phones and full screen. The calculator fills the viewport and the keys stretch to the aspect ratio */
@@ -68,12 +68,16 @@ body.fill .k.fk{max-height:30px}
 body.fill #calc.land{flex-direction:row;gap:16px}
 body.fill #calc.land #dpad{transform:scale(.78)}
 body.fill #calc.land #scr{width:400px;display:flex;flex-direction:column;justify-content:center}
+#pipnote{display:none;flex-direction:column;align-items:center;gap:12px;padding:40px 24px;text-align:center;color:#dde3ee;font-size:15px}
+#pipnote.on{display:flex}
+#pipnote button{background:#2f6fd8;color:#fff;border:0;border-radius:8px;padding:10px 18px;font-size:14px;cursor:pointer}
 </style>
 </head>
 <body>
+<div id="pipnote"><div>The calculator is floating in its own window, on top of your other apps.</div><button id="pipback">Bring it back here</button></div>
 <div id="calc">
   <div id="scr">
-    <div id="top"><span class="brand">CASIO</span><span><span class="model">fx-CG50</span><button id="fs" title="Full screen" aria-label="Full screen">⛶</button></span></div>
+    <div id="top"><span class="brand">CASIO</span><span><span class="model">fx-CG50</span><button id="pip" title="Pop out: floating calculator that stays on top of other windows" aria-label="Pop out">⧉</button><button id="fs" title="Full screen" aria-label="Full screen">⛶</button></span></div>
     <div id="bezel"><canvas id="lcd" width="1152" height="648"></canvas></div>
   </div>
   <div id="keys"></div>
@@ -89,6 +93,7 @@ body.fill #calc.land #scr{width:400px;display:flex;flex-direction:column;justify
     <tr><td><kbd>Esc</kbd></td><td>EXIT</td></tr>
     <tr><td><kbd>F1</kbd>–<kbd>F6</kbd>, arrows</td><td>F1–F6, cursor pad</td></tr>
     <tr><td><kbd>Tab</kbd> / <kbd>a</kbd></td><td>SHIFT / ALPHA</td></tr>
+    <tr><td><kbd>Tab</kbd> <kbd>4</kbd></td><td>CATALOG (type letters to search ALL)</td></tr>
     <tr><td><kbd>m</kbd> <kbd>o</kbd> <kbd>v</kbd></td><td>MENU, OPTN, VARS</td></tr>
     <tr><td><kbd>x</kbd></td><td>X,θ,T</td></tr>
     <tr><td><kbd>_</kbd></td><td>(−) negative</td></tr>
@@ -104,7 +109,7 @@ body.fill #calc.land #scr{width:400px;display:flex;flex-direction:column;justify
 <script>
 'use strict';
 /* ================= canvas primitives ================= */
-const $=id=>document.getElementById(id);
+const $=id=>document.getElementById(id);const CALC=$('calc');
 const cv=$('lcd'),g=cv.getContext('2d');
 const W=384,H=216,SC=3;
 const FONT='Menlo,"DejaVu Sans Mono",Consolas,"Liberation Mono","Courier New",monospace';
@@ -264,6 +269,70 @@ const FCALL={
   'UnitV(':a=>{if(a.length!==1)throw SYN;const A=a[0](),n=vnorm(vflat(A));if(N(n)===0)throw MA;return mmap(A,x=>div(x,n))},
   'Norm(':a=>{if(a.length!==1)throw SYN;const A=a[0]();if(!isM(A))throw SYN;return vnorm([].concat(...A.d))},
   'RanInt#(':a=>{if(a.length<2)throw SYN;const lo=N(a[0]()),hi=N(a[1]());if(!Number.isInteger(lo)||!Number.isInteger(hi)||hi<lo)throw MA;return I(lo+Math.floor(Math.random()*(hi-lo+1)))}};
+/* ---- extra functions, mostly reached through the Catalog ---- */
+const lst=x=>{if(!Array.isArray(x))throw SYN;if(!x.length)throw DIM;return x};
+const intv=x=>{x=N(x);if(!Number.isInteger(x))throw MA;return x};
+const lmap=(x,f)=>Array.isArray(x)?x.map(v=>cl(f(N(v)))):cl(f(N(x))); // distribution commands accept a single value or a list
+const exI=x=>Number.isInteger(x)&&Math.abs(x)<9e15?I(x):x;
+Object.assign(PFX,{
+  'sinh ':x=>cl(Math.sinh(N(x))),'cosh ':x=>cl(Math.cosh(N(x))),'tanh ':x=>cl(Math.tanh(N(x))),
+  'sinh⁻¹ ':x=>cl(Math.asinh(N(x))),'cosh⁻¹ ':x=>{x=N(x);if(x<1)throw MA;return cl(Math.acosh(x))},'tanh⁻¹ ':x=>{x=N(x);if(!(x>-1&&x<1))throw MA;return cl(Math.atanh(x))},
+  'Sum ':x=>lst(x).reduce((t,v)=>add(t,v),I(0)),'Prod ':x=>lst(x).reduce((t,v)=>mul(t,v),I(1)),
+  'Cuml ':x=>{let t=I(0);return lst(x).map(v=>t=add(t,v))},
+  'Percent ':x=>{const t=N(PFX['Sum '](x));if(!t)throw MA;return x.map(v=>cl(N(v)/t*100))},
+  'ΔList ':x=>{lst(x);if(x.length<2)throw DIM;return x.slice(1).map((v,i)=>sub(v,x[i]))}});
+const npdf=(x,s,m)=>{if(!(s>0))throw MA;const z=(x-m)/s;return Math.exp(-z*z/2)/(s*Math.sqrt(2*Math.PI))};
+function ncd(lo,hi,s,m){if(!(s>0))throw MA;const za=(lo-m)/s,zb=(hi-m)/s,Q=z=>.5*erfc(z/Math.SQRT2);return Math.max(0,za>0?Q(za)-Q(zb):Phi(zb)-Phi(za))}
+const lnC=(n,k)=>{let t=0;for(let i=1;i<=k;i++)t+=Math.log((n-k+i)/i);return t};
+function bchk(n,p){if(!Number.isInteger(n)||n<1||n>1e5||!(p>=0&&p<=1))throw MA}
+function bpd(x,n,p){if(!Number.isInteger(x)||x<0||x>n)return 0;if(p===0)return x===0?1:0;if(p===1)return x===n?1:0;return Math.exp(lnC(n,Math.min(x,n-x))+x*Math.log(p)+(n-x)*Math.log(1-p))}
+function ppd(x,m){if(!Number.isInteger(x)||x<0)return 0;let t=-m+x*Math.log(m);for(let i=2;i<=x;i++)t-=Math.log(i);return Math.exp(t)}
+function dsum(f,lo,hi,cap){lo=Math.max(0,Math.ceil(lo-1e-9));hi=Math.min(cap,Math.floor(hi+1e-9));let t=0;for(let k=lo;k<=hi;k++)t+=f(k);return Math.min(1,t)}
+const pcap=m=>Math.ceil(m+40*Math.sqrt(m)+60),pchk=m=>{if(!(m>0)||m>1e5)throw MA};
+function dinv(P,f,cap){if(!(P>=0&&P<=1))throw MA;let t=0;for(let k=0;k<=cap;k++){t+=f(k);if(t>=P-1e-10)return k}return cap}
+function wlist(a){const x=lst(a[0]()).map(N),f=a[1]?lst(a[1]()).map(N):null;if(f&&f.length!==x.length)throw DIM;if(f&&f.some(q=>q<0))throw MA;return{x,f}}
+function mxmn(a,mx){if(!a.length)throw SYN;const v=a.map(f=>f()),pick=(p,q)=>mx?(N(q)>N(p)?q:p):(N(q)<N(p)?q:p);
+  if(v.length===1)return lst(v[0]).reduce(pick);
+  if(v.length===2&&Array.isArray(v[0])&&Array.isArray(v[1])){if(v[0].length!==v[1].length)throw DIM;return v[0].map((x,i)=>pick(x,v[1][i]))}
+  throw SYN}
+const gauss01=()=>{let u=0;while(!u)u=Math.random();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*Math.random())};
+const rbin=(n,p)=>{let k=0;for(let i=0;i<n;i++)if(Math.random()<p)k++;return I(k)};
+const rcount=(a,i)=>{if(!a[i])return 0;const n=N(a[i]());if(!Number.isInteger(n)||n<1||n>999)throw MA;return n};
+Object.assign(FCALL,{
+  'GCD(':a=>{if(a.length<2)throw SYN;return I(a.map(f=>Math.abs(intv(f()))).reduce(gcd))},
+  'LCM(':a=>{if(a.length<2)throw SYN;return I(a.map(f=>Math.abs(intv(f()))).reduce((p,q)=>p&&q?p/gcd(p,q)*q:0))},
+  'MOD(':a=>{if(a.length!==2)throw SYN;const n=intv(a[0]()),m=intv(a[1]());if(!m)throw MA;return I(n-m*Math.floor(n/m))},
+  'MOD_Exp(':a=>{if(a.length!==3)throw SYN;const b=intv(a[0]()),e=intv(a[1]()),m=intv(a[2]());if(e<0||m<=0)throw MA;
+    let r=1n,B=((BigInt(b)%BigInt(m))+BigInt(m))%BigInt(m),E=BigInt(e);const M=BigInt(m);while(E>0n){if(E&1n)r=r*B%M;B=B*B%M;E>>=1n}return I(Number(r))},
+  'RndFix(':a=>{if(a.length!==2)throw SYN;const n=intv(a[1]());if(n<0||n>9)throw MA;const v=a[0]();return isF(v)&&v.q===1?v:cl(+N(v).toFixed(n))},
+  'Pol(':a=>{if(a.length!==2)throw SYN;const x=N(a[0]()),y=N(a[1]());return[cl(Math.hypot(x,y)),cl(Math.atan2(y,x)/angK())]},
+  'Rec(':a=>{if(a.length!==2)throw SYN;const r=N(a[0]()),t=N(a[1]())*angK();return[cl(r*Math.cos(t)),cl(r*Math.sin(t))]},
+  'RanNorm#(':a=>{if(a.length<2)throw SYN;const s=N(a[0]()),m=N(a[1]()),n=rcount(a,2);if(!(s>0))throw MA;const r=()=>cl(+(m+s*gauss01()).toPrecision(10));return n?Array.from({length:n},r):r()},
+  'RanBin#(':a=>{if(a.length<2)throw SYN;const n=intv(a[0]()),p=N(a[1]()),c=rcount(a,2);if(n<1||n>1e5||!(p>=0&&p<=1))throw MA;return c?Array.from({length:c},()=>rbin(n,p)):rbin(n,p)},
+  'RanList#(':a=>{const n=rcount(a,0);if(!n)throw SYN;return Array.from({length:n},()=>+Math.random().toFixed(10))},
+  'Max(':a=>mxmn(a,true),'Min(':a=>mxmn(a,false),
+  'Mean(':a=>{if(!a.length)throw SYN;const{x,f}=wlist(a);let t=0,w=0;x.forEach((v,i)=>{const q=f?f[i]:1;t+=v*q;w+=q});if(!w)throw MA;return cl(t/w)},
+  'Median(':a=>{if(!a.length)throw SYN;const{x,f}=wlist(a),v=[];x.forEach((y,i)=>{const q=f?f[i]:1;if(!Number.isInteger(q))throw MA;for(let j=0;j<q;j++)v.push(y)});if(!v.length)throw MA;
+    v.sort((p,q)=>p-q);const n=v.length;return cl(n%2?v[n>>1]:(v[n/2-1]+v[n/2])/2)},
+  'Seq(':a=>{if(a.length<4||a.length>5||!a[1].vn)throw SYN;const v=a[1].vn,s=N(a[2]()),e=N(a[3]()),st=argN(a,4,1);if(!st||(e-s)/st<-1e-12)throw MA;
+    const n=Math.floor((e-s)/st+1e-9)+1;if(n>999)throw DIM;const o=VARS[v],out=[];try{for(let i=0;i<n;i++){VARS[v]=exI(cl(s+i*st));out.push(a[0]())}}finally{VARS[v]=o}return out},
+  // distributions (Casio argument order: σ before μ; omitted σ=1, μ=0)
+  'NormPD(':a=>{if(!a.length||a.length>3)throw SYN;const s=argN(a,1,1),m=argN(a,2,0);return lmap(a[0](),x=>npdf(x,s,m))},
+  'NormCD(':a=>{if(a.length<2||a.length>4)throw SYN;return cl(ncd(N(a[0]()),N(a[1]()),argN(a,2,1),argN(a,3,0)))},
+  'InvNormCD(':a=>{if(!a.length||a.length>4)throw SYN;let i=0,tail=-1;if(a.length>1){const t=N(a[0]());if(t===-1||t===0||t===1){tail=t;i=1}}
+    const P=a[i](),s=argN(a,i+1,1),m=argN(a,i+2,0);if(!(s>0))throw MA;
+    const one=p=>{if(!(p>0&&p<1))throw MA;return tail===-1?m+s*invN(p):tail===1?m+s*invN(1-p):null};
+    if(tail===0){const p=N(P);if(!(p>0&&p<1))throw MA;const z=invN((1+p)/2);return[cl(m-s*z),cl(m+s*z)]}return lmap(P,one)},
+  'BinomialPD(':a=>{if(a.length<2||a.length>3)throw SYN;const n=N(a[a.length-2]()),p=N(a[a.length-1]());bchk(n,p);
+    if(a.length===2)return Array.from({length:n+1},(_,k)=>cl(bpd(k,n,p)));return lmap(a[0](),x=>bpd(x,n,p))},
+  'BinomialCD(':a=>{if(a.length<2||a.length>4)throw SYN;const n=N(a[a.length-2]()),p=N(a[a.length-1]());bchk(n,p);const f=k=>bpd(k,n,p);
+    if(a.length===2){let t=0;return Array.from({length:n+1},(_,k)=>cl(Math.min(1,t+=f(k))))}
+    if(a.length===3)return lmap(a[0](),x=>dsum(f,0,x,n));return cl(dsum(f,N(a[0]()),N(a[1]()),n))},
+  'InvBinomialCD(':a=>{if(a.length!==3)throw SYN;const n=N(a[1]()),p=N(a[2]());bchk(n,p);return lmap(a[0](),P=>dinv(P,k=>bpd(k,n,p),n))},
+  'PoissonPD(':a=>{if(a.length!==2)throw SYN;const m=N(a[1]());pchk(m);return lmap(a[0](),x=>ppd(x,m))},
+  'PoissonCD(':a=>{if(a.length<2||a.length>3)throw SYN;const m=N(a[a.length-1]());pchk(m);const f=k=>ppd(k,m);
+    if(a.length===2)return lmap(a[0](),x=>dsum(f,0,x,pcap(m)));return cl(dsum(f,N(a[0]()),N(a[1]()),pcap(m)))},
+  'InvPoissonCD(':a=>{if(a.length!==2)throw SYN;const m=N(a[1]());pchk(m);return lmap(a[0](),P=>dinv(P,k=>ppd(k,m),pcap(m)))}});
 function compile(list){const P={l:list,i:0};if(!list.length)throw SYN;const f=pExpr(P);if(P.i<list.length)throw SYN;return f}
 function pExpr(P){let a=pTerm(P);for(;;){const t=P.l[P.i];if(t==='+'||t==='-'){P.i++;const b=pTerm(P),x=a,op=t==='+'?add:sub;a=()=>op(x(),b())}else return a}}
 function pTerm(P){let a=pPC(P);for(;;){const t=P.l[P.i];if(t==='×'||t==='÷'){P.i++;const b=pPC(P),x=a,op=t==='×'?mul:div;a=()=>op(x(),b())}else return a}}
@@ -277,6 +346,7 @@ function pTight(P){let a=pPost(P);while(isVarTok(P.l[P.i])){const b=pPost(P),x=a
 function pPost(P){let a=pPrim(P);for(;;){const t=P.l[P.i];
   if(t&&t.t==='pow'){P.i++;const e=compile(t.s[0]),x=a;a=()=>pw(x(),e())}
   else if(t==='!'){P.i++;const x=a;a=()=>fact(x())}
+  else if(t==='°'||t==='ʳ'||t==='ᵍ'){P.i++;const x=a,f={'°':Math.PI/180,'ʳ':1,'ᵍ':Math.PI/200}[t];a=()=>cl(N(x())*f/angK())}
   else return a}}
 function pPrim(P){const t=P.l[P.i];if(t===undefined)throw SYN;
   if(typeof t==='object'){P.i++;const k=t.s;switch(t.t){
@@ -318,7 +388,7 @@ function pPrim(P){const t=P.l[P.i];if(t===undefined)throw SYN;
   if(t in FCALL){const args=[];if(P.l[P.i]!==')')for(;;){let a=pExpr(P);if(P.l[P.i]==='='){P.i++;const b=pExpr(P),x=a;a=()=>sub(x(),b())}args.push(a);const u=P.l[P.i];if(u===','){P.i++;continue}if(u===')'){P.i++;break}if(u===undefined)break;throw SYN}
     else P.i++;const f=FCALL[t];return()=>f(args)}
   if(t in SEQTOK)return()=>SEQV[t];
-  if(t in VARS)return()=>VARS[t];
+  if(t in VARS){const f=()=>VARS[t];f.vn=t;return f}
   throw SYN}
 const has=(l,pred)=>l.some(n=>pred(n)||(typeof n==='object'&&n.s.some(s=>has(s,pred))));
 const clone=l=>l.map(n=>typeof n==='string'?n:Object.assign({},n,{s:n.s.map(clone)}));
@@ -1468,6 +1538,127 @@ class Dist extends Scr{
     else if(k==='EXIT')pop();else if(isStart(k)&&k!=='XTT'){this.ed=new Ed();this.ed.key(k)}}
 }
 
+/* ================= CATALOG (SHIFT+4) =================
+   Every command the emulator understands, by category, plus an alphabetical ALL list with letter search,
+   a history of the last six commands and a syntax note for each one. The chosen command goes into the
+   input line of the screen the catalog was opened from. */
+const CATG=[['ALL'],['Calculation',['Functions','Numeric','Angle/Coord','Hyperbolic','Probability','Calculus','Complex','Memory/Other']],
+  ['Statistics',['Normal Dist','Binomial Dist','Poisson Dist']],['Matrix/Vector'],['List'],['Graph']];
+const CATI=[];
+// each entry: [name shown in ALL, label shown in its category, syntax, description, what to insert]
+// insert: a token string, '#key' to press an editor key, or a function(ed)
+function CI(cat,sub,rows){rows.forEach(([n,l,syn,d,a])=>CATI.push({cat,sub,n,l,syn,d,a:a===undefined?n:a}))}
+const tpl=(t,k,f)=>e=>e.st(t,Array.from({length:k},()=>[]),f||0);
+CI(1,0,[['sin','Sine','sin x','Sine of x, in the current angle unit.','sin '],['cos','Cosine','cos x','Cosine of x, in the current angle unit.','cos '],
+  ['tan','Tangent','tan x','Tangent of x, in the current angle unit.','tan '],['sin⁻¹','Inverse sine','sin⁻¹ x','Angle whose sine is x.','sin⁻¹ '],
+  ['cos⁻¹','Inverse cosine','cos⁻¹ x','Angle whose cosine is x.','cos⁻¹ '],['tan⁻¹','Inverse tangent','tan⁻¹ x','Angle whose tangent is x.','tan⁻¹ '],
+  ['log','Common logarithm','log x','Logarithm to base 10.','log '],['ln','Natural logarithm','ln x','Logarithm to base e.','ln '],
+  ['√','Square root','√x','Square root of x.','#sqrt'],['∛','Cube root','∛x','Cube root of x.','#cbrt'],['ˣ√','Power root','ˣ√y','The x-th root of y.','#nroot'],
+  ['x²','Square','x²','x squared.','#x2'],['x⁻¹','Reciprocal','x⁻¹','1 divided by x.','#inv'],['^','Power','x^y','x raised to the power y.','#^'],
+  ['10^x','Power of ten','10^x','10 raised to the power x.','#10^'],['e^x','Exponential','e^x','e raised to the power x.','#e^'],
+  ['π','Pi','π','The constant π = 3.14159…','π'],['e','Euler number','e','The constant e = 2.71828…','e'],['▫/▫','Fraction','a/b','Fraction template.','#frac']]);
+CI(1,1,[['Abs','Absolute value','Abs x','Absolute value (modulus for complex numbers).',tpl('abs',1)],['Int','Integer part','Int x','Integer part of x, rounding toward zero.','Int '],
+  ['Frac','Fraction part','Frac x','Fractional part of x.','Frac '],['Intg','Floor (integer ≤ x)','Intg x','Largest integer not greater than x.','Intg '],
+  ['RndFix(','Round to n places','RndFix(x,n)','Rounds x to n decimal places (n = 0 to 9).'],['GCD(','Greatest common div','GCD(a,b[,…])','Greatest common divisor of integers.'],
+  ['LCM(','Least common mult','LCM(a,b[,…])','Least common multiple of integers.'],['MOD(','Remainder','MOD(n,m)','Remainder when n is divided by m.'],
+  ['MOD_Exp(','Remainder of power','MOD_Exp(a,b,m)','Remainder when a^b is divided by m.']]);
+CI(1,2,[['°','Degrees','x°','Takes x as degrees, whatever the angle setting.'],['ʳ','Radians','xʳ','Takes x as radians, whatever the angle setting.'],
+  ['ᵍ','Grads','xᵍ','Takes x as grads, whatever the angle setting.'],['∠','Polar complex','r∠θ','Complex number with modulus r and argument θ.'],
+  ['Pol(','Rect → polar','Pol(x,y)','Converts rectangular (x,y) to polar. Returns {r,θ}.'],['Rec(','Polar → rect','Rec(r,θ)','Converts polar (r,θ) to rectangular. Returns {x,y}.']]);
+CI(1,3,[['sinh','Hyperbolic sine','sinh x','Hyperbolic sine of x.','sinh '],['cosh','Hyperbolic cosine','cosh x','Hyperbolic cosine of x.','cosh '],
+  ['tanh','Hyperbolic tangent','tanh x','Hyperbolic tangent of x.','tanh '],['sinh⁻¹','Inv hyperbolic sin','sinh⁻¹ x','Inverse hyperbolic sine.','sinh⁻¹ '],
+  ['cosh⁻¹','Inv hyperbolic cos','cosh⁻¹ x','Inverse hyperbolic cosine (x ≥ 1).','cosh⁻¹ '],['tanh⁻¹','Inv hyperbolic tan','tanh⁻¹ x','Inverse hyperbolic tangent (-1 < x < 1).','tanh⁻¹ ']]);
+CI(1,4,[['x!','Factorial','x!','x factorial, for whole numbers 0 to 69.','!'],['nPr','Permutation','nPr','Ordered selections of r from n.','nPr'],
+  ['nCr','Combination','nCr','Unordered selections of r from n.','nCr'],['Ran#','Random number','Ran#','Random number from 0 to 1.'],
+  ['RanInt#(','Random integer','RanInt#(a,b)','Random integer from a to b.'],['RanNorm#(','Random normal','RanNorm#(σ,μ[,n])','Normally distributed random number, or a list of n.'],
+  ['RanBin#(','Random binomial','RanBin#(n,p[,m])','Binomially distributed random number, or a list of m.'],['RanList#(','Random list','RanList#(n)','List of n random numbers from 0 to 1.']]);
+CI(1,5,[['Solve(','Solve equation','Solve(f(x),x0[,a,b])','One solution of f(x)=0 near x0.'],['SolveN(','Solve (all roots)','SolveN(f(x)[,a,b])','All solutions of f(x)=0, as a list.'],
+  ['d/dx(','Derivative','d/dx(f(x))|x=a','Derivative of f at x = a.',tpl('ddx',2)],['d²/dx²(','Second derivative','d²/dx²(f(x))|x=a','Second derivative of f at x = a.',tpl('d2',2)],
+  ['∫(','Integral','∫ f(x) dx from a to b','Definite integral of f from a to b.',tpl('int',3)],['FMin(','Minimum of function','FMin(f(x),a,b)','Minimum point of f between a and b. Returns {x,y}.'],
+  ['FMax(','Maximum of function','FMax(f(x),a,b)','Maximum point of f between a and b. Returns {x,y}.'],['Σ(','Summation','Σ(f(x),x,a,b)','Sum of f(x) for x = a to b.',tpl('sum',4)],
+  ['logab','Log with base','log_a(b)','Logarithm of b to base a.',tpl('logab',2)]]);
+CI(1,6,[['i','Imaginary unit','i','The imaginary unit, i² = -1.'],['Arg','Argument','Arg z','Argument (angle) of a complex number.','Arg '],
+  ['Conjg','Conjugate','Conjg z','Complex conjugate.','Conjg '],['ReP','Real part','ReP z','Real part of a complex number.','ReP '],['ImP','Imaginary part','ImP z','Imaginary part of a complex number.','ImP ']]);
+CI(1,7,[['Ans','Last answer','Ans','The most recent result.'],['→','Assign to variable','expr→A','Stores a value in a variable, list or matrix.'],['ᴇ','Exponent ×10ˣ','aᴇb','a × 10 to the power b.']]);
+CI(2,0,[['NormPD(','Normal P.D.','NormPD(x[,σ,μ])','Normal probability density at x (σ=1, μ=0 if omitted).'],
+  ['NormCD(','Normal C.D.','NormCD(lo,up[,σ,μ])','Normal probability between lo and up.'],
+  ['InvNormCD(','Inverse Normal C.D.','InvNormCD([tail,]p[,σ,μ])','Value with left-tail area p. tail: -1 left, 1 right, 0 central.']]);
+CI(2,1,[['BinomialPD(','Binomial P.D.','BinomialPD([x,]n,p)','P(X = x). Without x: list for x = 0…n.'],
+  ['BinomialCD(','Binomial C.D.','BinomialCD([[lo,]up,]n,p)','P(lo ≤ X ≤ up). Without bounds: cumulative list.'],
+  ['InvBinomialCD(','Inverse Binomial CD','InvBinomialCD(P,n,p)','Smallest x with P(X ≤ x) ≥ P.']]);
+CI(2,2,[['PoissonPD(','Poisson P.D.','PoissonPD(x,μ)','P(X = x) for mean μ.'],['PoissonCD(','Poisson C.D.','PoissonCD([lo,]up,μ)','P(lo ≤ X ≤ up) for mean μ.'],
+  ['InvPoissonCD(','Inverse Poisson CD','InvPoissonCD(P,μ)','Smallest x with P(X ≤ x) ≥ P.']]);
+CI(3,-1,[['Mat','Matrix','Mat A','Refers to matrix A to Z.','Mat '],['Vct','Vector','Vct A','Refers to vector A to Z.','Vct '],['Det','Determinant','Det Mat A','Determinant of a square matrix.','Det '],
+  ['Trn','Transpose','Trn Mat A','Transposed matrix.','Trn '],['Augment(','Join matrices','Augment(Mat A,Mat B)','Joins two matrices side by side.'],
+  ['Identity','Identity matrix','Identity n','n×n identity matrix.','Identity '],['Dim','Dimension','Dim Mat A','Dimensions of a matrix, or length of a list.','Dim '],
+  ['Fill(','Fill matrix','Fill(value,Mat A)','Sets every element of a matrix to value.'],['Ref','Row echelon form','Ref Mat A','Row echelon form.','Ref '],
+  ['Rref','Reduced row echelon','Rref Mat A','Reduced row echelon form.','Rref '],['Mat→List(','Column to list','Mat→List(Mat A,n)','Column n of a matrix as a list.'],
+  ['DotP(','Dot product','DotP(Vct A,Vct B)','Dot product of two vectors.'],['CrossP(','Cross product','CrossP(Vct A,Vct B)','Cross product of two vectors.'],
+  ['Angle(','Angle of vectors','Angle(Vct A,Vct B)','Angle between two vectors.'],['UnitV(','Unit vector','UnitV(Vct A)','Unit vector in the same direction.'],
+  ['Norm(','Norm','Norm(Vct A)','Length of a vector (or matrix norm).']]);
+CI(4,-1,[['List','List','List n','Refers to List 1 to 26.','List '],['{','List data','{a,b,…}','Starts a list of values.'],['Sum','Sum of elements','Sum List 1','Sum of all elements.','Sum '],
+  ['Prod','Product of elements','Prod List 1','Product of all elements.','Prod '],['Cuml','Cumulative sums','Cuml List 1','List of running totals.','Cuml '],
+  ['Percent','Percentages','Percent List 1','Each element as a percentage of the total.','Percent '],['ΔList','Differences','ΔList List 1','Differences between neighbouring elements.','ΔList '],
+  ['Seq(','Make sequence','Seq(f(X),X,a,b[,step])','List of f(X) for X = a to b.'],['Max(','Maximum','Max(List 1[,List 2])','Largest element, or element-wise larger of two lists.'],
+  ['Min(','Minimum','Min(List 1[,List 2])','Smallest element, or element-wise smaller of two lists.'],['Mean(','Mean','Mean(List 1[,freq])','Mean, optionally weighted by a frequency list.'],
+  ['Median(','Median','Median(List 1[,freq])','Median, optionally with a frequency list.']]);
+CI(5,-1,[['Y','Graph function','Yn  or  Yn(x)','Graph function Yn, or its value at x.','fY']]);
+const CATALL=CATI.slice().sort((a,b)=>{const la=/^[A-Za-z]/.test(a.n),lb=/^[A-Za-z]/.test(b.n);if(la!==lb)return la?-1:1;return la?a.n.toUpperCase().localeCompare(b.n.toUpperCase()):0});
+const CATS={view:'all',i:0,hist:[]}; // the catalog reopens on the list and command used last
+function catIns(e,it){const a=it.a;if(typeof a==='function')a(e);else if(a[0]==='#'&&a.length>1)e.key(a.slice(1));else e.ins(a)}
+// the input line of screen s, starting one if the screen edits only on demand
+function catTarget(s){if(s.hs!=null)s.hs=null;const cur=()=>s.ed instanceof Ed?s.ed:s.ved instanceof Ed?s.ved:null;let e=cur();if(e)return e;
+  if(!('ed' in s||'ved' in s))return null;try{s.key('(')}catch(x){return null}e=cur();if(e)e.del();return e}
+function openCat(){const s=topS();if(s instanceof Catalog)return;const e=catTarget(s);if(!e){note('CATALOG: no input line here');return}push(new Catalog(e))}
+class Catalog extends Scr{
+  constructor(tgt){super();this.tgt=tgt;this.mode='list';this.view=CATS.view;this.i=CATS.i;this.t=0;this.q='';this.help=false;this.ci=0;this.prev='all'}
+  st(){return this.q?'Search: '+this.q:''}
+  items(){const v=this.view;if(v==='all')return CATALL;if(v==='hist')return CATS.hist;const[c,sb]=v.split('.').map(Number);return CATI.filter(it=>it.cat===c&&(sb==null||isNaN(sb)||it.sub===sb))}
+  title(){const v=this.view;if(v==='all')return'ALL';if(v==='hist')return'HISTORY';const[c,sb]=v.split('.').map(Number),G=CATG[c];return G[1]&&!isNaN(sb)?G[1][sb]:G[0]}
+  rows(){if(this.mode==='cat')return CATG.map((c,j)=>(j+1)+':'+c[0]);if(this.mode==='sub')return CATG[this.cc][1].map((c,j)=>(j+1)+':'+c);
+    return this.items().map(it=>this.view==='all'||this.view==='hist'?it.n:it.l)}
+  fk(){if(this.mode!=='list')return['~EXE'];if(this.view==='hist')return['~INPUT','~SYNTAX','','','','CAT'];return['~INPUT','~SYNTAX','','','HISTORY','CAT']}
+  draw(){const R=this.rows(),n=R.length,rows=6,cur=this.mode==='list'?this.i:this.ci;
+    txt(this.mode==='cat'?'CATEGORY':this.mode==='sub'?CATG[this.cc][0]:this.title(),2,24,{c:TB});
+    if(cur<this.t)this.t=cur;if(cur>=this.t+rows)this.t=cur-rows+1;this.t=clamp(this.t,0,Math.max(0,n-rows));
+    if(!n)txt(this.view==='hist'?'No History':'',2,72);
+    for(let r=0;r<rows&&this.t+r<n;r++){const j=this.t+r,y=48+r*24,sel=j===cur,s=R[j].length>20?R[j].slice(0,19)+'…':R[j];if(sel)rect(0,y,W-14,24,'#000');txt(s,2,y,{c:sel?'#fff':'#000'})}
+    if(this.t+rows<n)sm('↓',372,180,{c:MAG,sz:16});if(this.t>0)sm('↑',372,60,{c:MAG,sz:16});
+    fbar(this.fk());
+    if(this.help){const it=this.items()[this.i];if(!it)return;dbox(10,34,364,152);const nw=sm(it.n,22,50,{sz:15,c:TB});sm(it.l,34+nw,50,{sz:11,c:'#555'});
+      sm('Syntax',22,74,{sz:10,c:'#555'});sm(it.syn,22,90,{sz:13});
+      g.font='bold 12px '+FONT;let y=118,ln='';for(const w of it.d.split(' ')){const t=ln?ln+' '+w:w;if(g.measureText(t).width>334&&ln){sm(ln,22,y,{sz:12});y+=16;ln=w}else ln=t}if(ln)sm(ln,22,y,{sz:12});
+      sm('Press any key',362,174,{sz:9,al:'right',c:'#777'})}}
+  keep(){if(this.view!=='hist'){CATS.view=this.view;CATS.i=this.i}}
+  input(){const it=this.items()[this.i];if(!it)return;if(this.view==='hist')this.view=this.prev;else this.keep();closeTop();catIns(this.tgt,it);
+    CATS.hist=[it,...CATS.hist.filter(h=>h!==it)].slice(0,6)}
+  search(L){if(this.view!=='all'||this.q.length>=8)return;const q=this.q+L,j=CATALL.findIndex(it=>it.n.toUpperCase().startsWith(q));if(j<0)return;this.q=q;this.i=j}
+  key(k,Kd){
+    if(this.help){this.help=false;return}
+    const n=this.rows().length;
+    if(this.mode!=='list'){const subs=this.mode==='sub';
+      if(k==='UP')this.ci=(this.ci+n-1)%n;else if(k==='DOWN')this.ci=(this.ci+1)%n;
+      else if(k==='EXIT'){if(subs){this.mode='cat';this.ci=this.cc}else this.mode='list'}
+      else{let j=-1;if(k==='EXE'||k==='F1')j=this.ci;else if(/^[1-9]$/.test(k)&&+k<=n)j=+k-1;if(j<0)return;
+        if(subs){this.view=this.cc+'.'+j;this.mode='list';this.i=0;this.t=0}
+        else if(CATG[j][1]){this.cc=j;this.mode='sub';this.ci=0}
+        else{this.view=j?String(j):'all';this.mode='list';this.i=0;this.t=0}}
+      return}
+    const L=/^[A-Z]$/.test(k)?k:Kd&&k===Kd.id&&/^[A-Z]$/.test(Kd.a)?Kd.a:null;
+    if(L&&this.view==='all'){this.search(L);return}
+    if(k==='DEL'){if(this.q){this.q=this.q.slice(0,-1);if(this.q)this.search('');else this.q=''}return}
+    if(['UP','DOWN','LEFT','RIGHT'].includes(k))this.q='';
+    if(!n){if(k==='EXIT'||k==='F6'){this.view=this.prev;if(k==='F6'){this.mode='cat';this.ci=0}}return}
+    switch(k){
+      case'UP':this.i=(this.i+n-1)%n;break;case'DOWN':this.i=(this.i+1)%n;break;
+      case'LEFT':this.i=Math.max(0,this.i-6);break;case'RIGHT':this.i=Math.min(n-1,this.i+6);break;
+      case'EXE':case'F1':this.input();break;
+      case'F2':this.help=true;break;
+      case'F5':if(this.view!=='hist'){this.keep();this.prev=this.view;this.view='hist';this.i=0;this.t=0}break;
+      case'F6':if(this.view==='hist'){this.view=this.prev;this.i=CATS.i}this.mode='cat';this.ci=Math.max(0,CATG.findIndex((c,j)=>this.view===(j?String(j):'all')||this.view.split('.')[0]===String(j)));break;
+      case'EXIT':if(this.view==='hist'){this.view=this.prev;this.i=CATS.i}else{this.keep();closeTop()}break}}
+}
+
 /* ================= keyboard, dispatch, boot ================= */
 const KD={};
 function K(id,l,s,a,sl,c,al){KD[id]={id,l,s,a:a||null,sl:sl||'',c:c||'',al:al!==undefined?al:(a||'')}}
@@ -1489,6 +1680,8 @@ function dispatch(k,Kd){
   if(k==='MENU'){stack.length=1;render();return}
   try{
     if(k==='SETUP'){if(!(topS()instanceof Setup))push(new Setup())}
+    else if(k==='CATALOG')openCat();
+    else if(k==='QUIT'&&topS()instanceof Catalog){topS().keep();closeTop()}
     else if(k==='QUIT'){if(stack.length>2)stack.length=2;topS().key(k,Kd)}
     else topS().key(k,Kd)
   }catch(e){err(e)}
@@ -1500,7 +1693,7 @@ function press(id){const d=KD[id];if(!d)return;
   if(id==='ALPHA'){if(shift){alock=alpha=true;shift=false}else{alpha=!alpha;if(!alpha)alock=false}render();return}
   let k=id;if(shift){if(d.s!==undefined)k=d.s}else if(alpha&&d.a)k=d.a;
   shift=false;if(!alock)alpha=false;
-  if(['CAPTURE','CLIP','PASTE','INS','UNDO','CATALOG','PRGM','SPACE','"'].includes(k)){note(k+': not supported');render();return}
+  if(['CAPTURE','CLIP','PASTE','INS','UNDO','PRGM','SPACE','"'].includes(k)){note(k+': not supported');render();return}
   dispatch(k,d)}
 function logical(k){if(!power)return;NOTE=null;shift=false;if(!alock)alpha=false;dispatch(k,null)}
 function drawStatus(){rect(0,0,W,23,'#fff');line(0,23.5,W,23.5,'#7fa6dc');frame(4,5,10,14,'#000');rect(7,3,4,2,'#000');rect(6,9,6,8,'#3a3');
@@ -1521,7 +1714,7 @@ function resetAll(){RUNH.length=0;ANS=0;MATANS=VCTANS=null;for(const k in MATS)d
   Object.assign(SETUP,{io:'Math',frac:'d/c',draw:'Connect',angle:'Deg',coord:'On',grid:'Line',axes:'On',label:'On',disp:'Norm1',bg:null,cplx:'Real',deriv:'Off'});CON.marks.length=0;CON.color=null}
 let repT=null,repI=null;
 const stopRep=()=>{clearTimeout(repT);clearInterval(repI)};
-function flash(id){const b=document.querySelector('[data-k="'+(window.CSS&&CSS.escape?CSS.escape(id):id)+'"]');if(b){b.classList.add('on');setTimeout(()=>b.classList.remove('on'),110)}}
+function flash(id){const b=CALC.querySelector('[data-k="'+(window.CSS&&CSS.escape?CSS.escape(id):id)+'"]');if(b){b.classList.add('on');setTimeout(()=>b.classList.remove('on'),110)}}
 function build(){const root=$('keys');
   const mk=id=>{const d=KD[id],kc=document.createElement('div');kc.className='kc';kc.innerHTML='<div class="lab"><span class="s">'+d.sl+'</span><span class="a">'+(d.al==='SPACE'?'␣':d.al)+'</span></div>';
     const b=document.createElement('button');b.className='k '+d.c;b.innerHTML=d.l;b.dataset.k=id;b.tabIndex=-1;kc.appendChild(b);return kc};
@@ -1534,16 +1727,28 @@ function build(){const root=$('keys');
   cv.addEventListener('pointerdown',e=>{const r=cv.getBoundingClientRect(),t=topS();if(power&&t.click){t.click((e.clientX-r.left)/r.width*W,(e.clientY-r.top)/r.height*H);render()}})}
 const KB={Enter:'EXE',Backspace:'DEL',Delete:'AC',Escape:'EXIT',ArrowUp:'UP',ArrowDown:'DOWN',ArrowLeft:'LEFT',ArrowRight:'RIGHT',F1:'F1',F2:'F2',F3:'F3',F4:'F4',F5:'F5',F6:'F6',
   '+':'+','-':'-','*':'×','/':'÷','(':'(',')':')',',':',','.':'.','^':'^',Tab:'SHIFT','`':'ALPHA',a:'ALPHA',x:'XTT',s:'sin',c:'cos',t:'tan',l:'log',n:'ln',q:'x2',r:'!sqrt',p:'!π',e:'EXP','=':'!=','_':'NEG',m:'MENU',o:'OPTN',v:'VARS',f:'frac',d:'SD','>':'STO'};
-addEventListener('keydown',e=>{if(e.metaKey||e.ctrlKey||e.altKey)return;const k=e.key;let id=KB[k];if(!id&&/^[0-9]$/.test(k))id=k;if(!id&&/^[A-Z]$/.test(k))id='!'+k;if(!id)return;e.preventDefault();
-  if(id[0]==='!')logical(id.slice(1));else{flash(id);press(id)}});
+const onKey=e=>{if(e.metaKey||e.ctrlKey||e.altKey)return;const k=e.key;if(/^[a-zA-Z]$/.test(k)&&topS()instanceof Catalog&&topS().mode==='list'&&topS().view==='all'){e.preventDefault();logical(k.toUpperCase());return}let id=KB[k];if(!id&&/^[0-9]$/.test(k))id=k;if(!id&&/^[A-Z]$/.test(k))id='!'+k;if(!id)return;e.preventDefault();
+  if(id[0]==='!')logical(id.slice(1));else{flash(id);press(id)}};
+addEventListener('keydown',onKey);
 let pseudoFS=false;
 const COARSE=window.matchMedia&&matchMedia('(pointer:coarse)').matches;
 const isFS=()=>!!(document.fullscreenElement||document.webkitFullscreenElement);
-function fit(){const c=$('calc'),fill=COARSE||innerWidth<700||isFS()||pseudoFS;document.body.classList.toggle('fill',fill);c.style.zoom=1;c.style.width=c.style.height='';
-  if(!fill){c.classList.remove('land');c.style.zoom=Math.max(.45,Math.min(1.5,(innerHeight-24)/c.offsetHeight,(innerWidth-24)/c.offsetWidth));return}
+function fit(){const c=CALC,V=pipWin||window,w=V.innerWidth,h=V.innerHeight,fill=COARSE||w<700||isFS()||pseudoFS||!!pipWin;c.ownerDocument.body.classList.toggle('fill',fill);c.style.zoom=1;c.style.width=c.style.height='';
+  if(!fill){c.classList.remove('land');c.style.zoom=Math.max(.45,Math.min(1.5,(h-24)/c.offsetHeight,(w-24)/c.offsetWidth));return}
   // portrait: screen above keys; landscape: screen beside keys. Width/height are set so the zoomed box exactly covers the viewport
-  const land=innerWidth>innerHeight*1.15,z=land?Math.min(innerWidth/860,innerHeight/400):Math.min(innerWidth/440,innerHeight/640);
-  c.classList.toggle('land',land);c.style.zoom=z;c.style.width=innerWidth/z+'px';c.style.height=innerHeight/z+'px'}
+  const land=w>h*1.15,z=land?Math.min(w/860,h/400):Math.min(w/440,h/640);
+  c.classList.toggle('land',land);c.style.zoom=z;c.style.width=w/z+'px';c.style.height=h/z+'px'}
+// Pop-out: Document Picture-in-Picture gives an always-on-top window (Chrome/Edge); elsewhere fall back to a small separate window
+let pipWin=null;
+async function togglePiP(){
+  if(pipWin){pipWin.close();return}
+  if(!('documentPictureInPicture' in window)){const w=window.open(location.href,'fxcg50pop','popup,width=380,height=680');note(w?'Always-on-top needs Chrome/Edge':'Pop-up was blocked');render();return}
+  let pw;try{pw=await documentPictureInPicture.requestWindow({width:380,height:660})}catch(e){note('Pop-out was blocked');render();return}
+  pipWin=pw;const d=pw.document;d.title='fx-CG50';document.querySelectorAll('style').forEach(st=>d.head.appendChild(st.cloneNode(true)));
+  d.body.appendChild(CALC);$('pipnote').classList.add('on');
+  pw.addEventListener('resize',fit);pw.addEventListener('keydown',onKey);pw.addEventListener('pointerup',stopRep);pw.addEventListener('pointercancel',stopRep);
+  pw.addEventListener('pagehide',()=>{document.body.insertBefore(CALC,$('help'));$('pipnote').classList.remove('on');pipWin=null;fit();render()});
+  fit();render()}
 function toggleFS(){const d=document,el=d.documentElement,req=el.requestFullscreen||el.webkitRequestFullscreen,ex=d.exitFullscreen||d.webkitExitFullscreen;
   if(isFS()){ex.call(d);return}
   if(req){try{const r=req.call(el);if(r&&r.catch)r.catch(()=>{pseudoFS=!pseudoFS;fit()})}catch(e){pseudoFS=!pseudoFS;fit()}}
@@ -1552,7 +1757,7 @@ function toggleFS(){const d=document,el=d.documentElement,req=el.requestFullscre
 let hapEl=null;
 function buzz(){if(!COARSE)return;if(navigator.vibrate){navigator.vibrate(8);return}
   if(!hapEl){hapEl=document.createElement('label');hapEl.id='hap';hapEl.innerHTML='<input type="checkbox" switch>';document.body.appendChild(hapEl)}hapEl.click()}
-build();stack.push(new MainMenu());fit();addEventListener('resize',fit);addEventListener('orientationchange',()=>setTimeout(fit,150));document.addEventListener('fullscreenchange',fit);document.addEventListener('webkitfullscreenchange',fit);$('fs').addEventListener('click',toggleFS);render();
+build();stack.push(new MainMenu());fit();addEventListener('resize',fit);addEventListener('orientationchange',()=>setTimeout(fit,150));document.addEventListener('fullscreenchange',fit);document.addEventListener('webkitfullscreenchange',fit);$('fs').addEventListener('click',toggleFS);$('pip').addEventListener('click',togglePiP);$('pipback').addEventListener('click',()=>{if(pipWin)pipWin.close()});render();
 setInterval(()=>{blink=!blink;if(power&&(CURPOS||!blink))render()},500);
 if(document.fonts&&document.fonts.ready)document.fonts.ready.then(render);
 </script>
